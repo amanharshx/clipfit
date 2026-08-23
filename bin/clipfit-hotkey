@@ -9,6 +9,14 @@
 
 CLIPFIT_BIN="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin/clipfit"
 
+# --- Tunables (edit these to change behavior everywhere the hotkey is used) ---
+# Longest-edge cap in pixels. Clears dimension limits (e.g. Kiro's 2000px).
+export CLIPFIT_MAX_DIM="${CLIPFIT_MAX_DIM:-1568}"
+# Output byte budget. 3.5mb -> ~4.66MB base64, comfortably under a 5MB limit.
+# Lower this (e.g. 3mb) for tools with a stricter filesize cap.
+export CLIPFIT_MAX_BYTES="${CLIPFIT_MAX_BYTES:-3.5mb}"
+# -----------------------------------------------------------------------------
+
 out="$("$CLIPFIT_BIN" --notify "$@" 2>&1)"
 status=$?
 
