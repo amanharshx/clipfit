@@ -1,29 +1,91 @@
-"""clipfit CLI.
+"""clipfit command-line interface.
 
-Default action: grab the image on the clipboard, downscale it to fit LLM input
-limits, and write the smaller version back. Only images larger than the cap are
-changed; everything else is left untouched.
-
-Usage:
-    clipfit                     # shrink clipboard image in place
-    clipfit --max-dim 2000      # custom longest-edge cap
-    clipfit --max-bytes 4mb     # custom byte budget (keeps base64 under limits)
-    clipfit path/to/img.png     # shrink a file instead (writes *_fit.png)
-    clipfit --quiet             # suppress output (for hotkey use)
+Default action shrinks the clipboard image. The ``hotkey`` subcommand group
+manages the keyboard shortcut (set / show / remove).
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
+from . import __version__
 from .core import DEFAULT_MAX_BYTES, DEFAULT_MAX_DIM, shrink_image_bytes
+
+DEFAULT_HOTKEY = "option+shift+v"
+
+TOP_HELP = """\
+clipfit \u2014 fewer pixels, fewer tokens, same readable image. For pasting into LLMs.
+
+USAGE
+  clipfit [options]           shrink the image on the clipboard (default)
+  clipfit <file> [options]    shrink an image file -> writes <name>_fit.png
+  clipfit hotkey <command>    manage the keyboard shortcut
+
+HOTKEY COMMANDS
+  clipfit hotkey set          choose/change the shortcut (interactive)
+  clipfit hotkey show         show the current shortcut and its status
+  clipfit hotkey remove       remove the shortcut
+
+OPTIONS
+  --max-dim N       cap the longest edge in pixels (default 1568)
+  --max-bytes SIZE  output byte budget, e.g. 3.5mb (default ~3.7mb)
+  --quiet           no terminal output (for hotkey use)
+  --notify          post a macOS notification with the result
+  --sound           play a short sound on success/failure (for hotkey use)
+  -h, --help        show this help
+  --version         show version
+
+EXAMPLES
+  clipfit                        shrink what's on the clipboard
+  clipfit shot.png --max-dim 2000
+  clipfit hotkey set --hotkey cmd+shift+v
+"""
+
+HOTKEY_HELP = """\
+clipfit hotkey \u2014 manage the shortcut that shrinks the clipboard image.
+
+USAGE
+  clipfit hotkey set [--hotkey COMBO] [--yes]   set or change the shortcut
+  clipfit hotkey show                           show the current shortcut and status
+  clipfit hotkey remove                         remove the shortcut
+
+Examples of COMBO: option+shift+v, cmd+shift+v, ctrl+opt+s
+"""
+
+
+# --- shared output helpers ----------------------------------------------------
+
+def _report(msg: str, quiet: bool, notify: bool) -> None:
+    if not quiet:
+        print(f"clipfit: {msg}")
+    if notify:
+        _macos_notify(msg)
+
+
+def _macos_notify(msg: str) -> None:
+    text = msg.replace('"', "'")
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'display notification "{text}" with title "clipfit"'],
+            check=False, timeout=5, capture_output=True,
+        )
+    except Exception:
+        pass
+
+
+def _play_sound(ok: bool) -> None:
+    snd = "/System/Library/Sounds/Pop.aiff" if ok else "/System/Library/Sounds/Basso.aiff"
+    try:
+        subprocess.Popen(["afplay", snd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 
 def _parse_bytes(v: str) -> int:
-    """Parse a byte budget like '3700000', '3.5mb', '900kb'."""
     s = str(v).strip().lower()
     mult = 1
     if s.endswith("mb"):
@@ -35,26 +97,9 @@ def _parse_bytes(v: str) -> int:
     return int(float(s) * mult)
 
 
-def _report(msg: str, quiet: bool, notify: bool) -> None:
-    if not quiet:
-        print(f"clipfit: {msg}")
-    if notify:
-        _macos_notify(msg)
+# --- shrink command -----------------------------------------------------------
 
-
-def _macos_notify(msg: str) -> None:
-    """Post a macOS notification (best-effort; ignored on failure)."""
-    import subprocess
-
-    text = msg.replace('"', "'")
-    script = f'display notification "{text}" with title "clipfit"'
-    try:
-        subprocess.run(["osascript", "-e", script], check=False, timeout=5)
-    except Exception:
-        pass
-
-
-def _run_clipboard(max_dim: int, max_bytes: int, quiet: bool, notify: bool) -> int:
+def _shrink_clipboard(max_dim: int, max_bytes: int, quiet: bool, notify: bool) -> int:
     from . import clipboard
 
     try:
@@ -82,7 +127,7 @@ def _run_clipboard(max_dim: int, max_bytes: int, quiet: bool, notify: bool) -> i
     return 0
 
 
-def _run_file(path: Path, max_dim: int, max_bytes: int, quiet: bool, notify: bool) -> int:
+def _shrink_file(path: Path, max_dim: int, max_bytes: int, quiet: bool, notify: bool) -> int:
     if not path.exists():
         _report(f"file not found: {path}", quiet=False, notify=notify)
         return 1
@@ -99,61 +144,207 @@ def _run_file(path: Path, max_dim: int, max_bytes: int, quiet: bool, notify: boo
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="clipfit",
-        description="Shrink oversized images so LLM chats can read them.",
-    )
-    p.add_argument(
-        "path",
-        nargs="?",
-        help="optional image file to shrink; if omitted, uses the clipboard",
-    )
-    p.add_argument(
-        "--max-dim",
-        type=int,
-        default=int(os.environ.get("CLIPFIT_MAX_DIM", DEFAULT_MAX_DIM)),
-        help=f"cap for the longest edge in pixels (default: {DEFAULT_MAX_DIM}, "
-        "or $CLIPFIT_MAX_DIM)",
-    )
-    p.add_argument(
-        "--max-bytes",
-        type=_parse_bytes,
-        default=_parse_bytes(os.environ.get("CLIPFIT_MAX_BYTES", str(DEFAULT_MAX_BYTES))),
-        help=f"byte budget for the output, e.g. 3.5mb (default: {DEFAULT_MAX_BYTES}, "
-        "or $CLIPFIT_MAX_BYTES). Sized so base64 stays under a 5MB request limit.",
-    )
-    p.add_argument(
-        "--quiet",
-        action="store_true",
-        help="suppress terminal output (useful when bound to a hotkey)",
-    )
-    p.add_argument(
-        "--notify",
-        action="store_true",
-        help="post a macOS notification with the result (for hotkey use)",
-    )
+def _build_shrink_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="clipfit", add_help=False)
+    p.add_argument("path", nargs="?")
+    p.add_argument("--max-dim", type=int,
+                   default=int(os.environ.get("CLIPFIT_MAX_DIM", DEFAULT_MAX_DIM)))
+    p.add_argument("--max-bytes", type=_parse_bytes,
+                   default=_parse_bytes(os.environ.get("CLIPFIT_MAX_BYTES", str(DEFAULT_MAX_BYTES))))
+    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--notify", action="store_true")
+    p.add_argument("--sound", action="store_true")
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def _run_shrink(argv: list[str]) -> int:
+    args = _build_shrink_parser().parse_args(argv)
     if args.max_dim < 1:
         _report("--max-dim must be >= 1", quiet=False, notify=args.notify)
-        return 2
-    if args.max_bytes < 1024:
+        rc = 2
+    elif args.max_bytes < 1024:
         _report("--max-bytes is too small (min 1024)", quiet=False, notify=args.notify)
-        return 2
+        rc = 2
+    elif args.path:
+        rc = _shrink_file(Path(args.path).expanduser(), args.max_dim, args.max_bytes,
+                          args.quiet, args.notify)
+    else:
+        rc = _shrink_clipboard(args.max_dim, args.max_bytes, args.quiet, args.notify)
 
-    if args.path:
-        return _run_file(
-            Path(args.path).expanduser(),
-            args.max_dim,
-            args.max_bytes,
-            args.quiet,
-            args.notify,
-        )
-    return _run_clipboard(args.max_dim, args.max_bytes, args.quiet, args.notify)
+    if args.sound:
+        _play_sound(ok=(rc == 0))
+    return rc
+
+
+# --- hotkey commands ----------------------------------------------------------
+
+def _hotkey_after_set(hk, quiet: bool = False) -> None:
+    """Restart skhd and print Accessibility guidance."""
+    hk.restart_service()
+    if hk.accessibility_ok():
+        print("  skhd is running with Accessibility. You're all set.")
+        print("  Copy an image, press your shortcut, then paste.")
+    else:
+        print()
+        print("\u26a0 skhd needs Accessibility permission to catch the shortcut.")
+        print("  Opening System Settings \u2192 Privacy & Security \u2192 Accessibility.")
+        print(f"  Turn on skhd ({hk.skhd_binary_path()}), then run:  clipfit hotkey show")
+        hk.open_accessibility_pane()
+
+
+def _hotkey_set(argv: list[str]) -> int:
+    from . import hotkey as hk
+
+    parser = argparse.ArgumentParser(prog="clipfit hotkey set", add_help=False)
+    parser.add_argument("--hotkey")
+    parser.add_argument("--yes", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
+    args = parser.parse_args(argv)
+    if args.help:
+        print(HOTKEY_HELP)
+        return 0
+
+    existing = hk.current_binding()
+
+    # Non-interactive paths.
+    if args.hotkey or args.yes:
+        combo = args.hotkey or DEFAULT_HOTKEY
+        try:
+            parsed = hk.parse_hotkey(combo)
+        except hk.HotkeyError as exc:
+            print(f"clipfit: {exc}")
+            return 2
+        conflict = hk.find_conflict(parsed.skhd)
+        if conflict:
+            print(f"\u26a0 {parsed.skhd} is already bound in your skhd config to something else.")
+            print("  Pick a different combo, or edit ~/.config/skhd/skhdrc yourself.")
+            return 2
+        hk.set_binding(parsed)
+        if existing:
+            print(f"\u2713 Hotkey set: {parsed.pretty}")
+        else:
+            print(f"\u2713 Hotkey set: {parsed.pretty}")
+        print("  skhd reloaded.")
+        hk.restart_service()
+        return 0
+
+    # Interactive path.
+    if existing:
+        old_skhd, old_pretty = existing
+        print("Change clipfit hotkey")
+        print()
+        print(f"Current shortcut is {old_pretty}. Press Enter to keep it.")
+        prompt = "Or type a new one: "
+        default_combo = old_skhd
+    else:
+        old_pretty = None
+        print("clipfit hotkey setup")
+        print()
+        print("Default shortcut is Option+Shift+V. Press Enter to use it.")
+        prompt = "Or type your own (e.g. cmd+shift+v, ctrl+opt+s): "
+        default_combo = DEFAULT_HOTKEY
+
+    while True:
+        try:
+            raw = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+        combo = raw or default_combo
+        try:
+            parsed = hk.parse_hotkey(combo)
+        except hk.HotkeyError as exc:
+            print(f"clipfit: {exc}")
+            continue
+        conflict = hk.find_conflict(parsed.skhd)
+        if conflict:
+            print(f"\u26a0 {parsed.skhd} is already bound in your skhd config to something else.")
+            print("  Pick a different combo.")
+            continue
+        break
+
+    print()
+    if existing and parsed.skhd == existing[0]:
+        print(f"\u2713 Hotkey unchanged: {parsed.pretty}")
+        hk.set_binding(parsed)
+        _hotkey_after_set(hk)
+        return 0
+
+    hk.set_binding(parsed)
+    if existing:
+        print(f"\u2713 Hotkey changed: {old_pretty} \u2192 {parsed.pretty}")
+    else:
+        print(f"\u2713 Hotkey set: {parsed.pretty}")
+        print("  Writing skhd config\u2026 done")
+    _hotkey_after_set(hk)
+    return 0
+
+
+def _hotkey_show(argv: list[str]) -> int:
+    from . import hotkey as hk
+
+    binding = hk.current_binding()
+    if not binding:
+        print("No clipfit hotkey is set. Run  clipfit hotkey set  to add one.")
+        return 0
+
+    _skhd_combo, pretty = binding
+    running = hk.service_running()
+    print(f"Current shortcut:  {pretty}")
+    print(f"Runs:              clipfit")
+    print(f"skhd service:      {'running' if running else 'not running'}")
+    if hk.accessibility_ok():
+        print(f"Accessibility:     granted")
+    else:
+        print(f"Accessibility:     looks missing \u2014 turn on skhd in "
+              f"System Settings \u2192 Accessibility")
+    return 0
+
+
+def _hotkey_remove(argv: list[str]) -> int:
+    from . import hotkey as hk
+
+    existing = hk.current_binding()
+    removed = hk.remove_binding()
+    if removed:
+        hk.restart_service()
+        pretty = existing[1] if existing else "unknown"
+        print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
+    else:
+        print("Nothing to remove \u2014 no clipfit hotkey is set.")
+    return 0
+
+
+def _run_hotkey(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(HOTKEY_HELP)
+        return 0
+    sub, rest = argv[0], argv[1:]
+    if sub == "set":
+        return _hotkey_set(rest)
+    if sub == "show":
+        return _hotkey_show(rest)
+    if sub == "remove":
+        return _hotkey_remove(rest)
+    print(f"clipfit: unknown hotkey command '{sub}'. Try: set, show, remove.")
+    return 2
+
+
+# --- entry point --------------------------------------------------------------
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if argv and argv[0] == "hotkey":
+        return _run_hotkey(argv[1:])
+    if argv and argv[0] == "--version":
+        print(f"clipfit {__version__}")
+        return 0
+    if argv and argv[0] in ("-h", "--help"):
+        print(TOP_HELP)
+        return 0
+
+    return _run_shrink(argv)
 
 
 if __name__ == "__main__":

@@ -1,32 +1,15 @@
 #!/bin/bash
-# clipfit hotkey wrapper.
-# Bind a keyboard shortcut to this script. It shrinks the current clipboard
-# image in place and gives feedback via sound + notification.
+# clipfit hotkey wrapper (for launchers other than skhd, e.g. Hammerspoon,
+# Raycast, Automator). `clipfit hotkey set` binds skhd directly to the clipfit
+# binary, so this wrapper is optional.
 #
-# Feedback is intentionally redundant: macOS notifications can be silently
-# suppressed by Focus/Do Not Disturb or lack of permission when launched from
-# skhd, so we also play a short sound.
+# Resolution order: clipfit on PATH (Homebrew/pipx install), then a dev venv
+# next to this script.
 
-CLIPFIT_BIN="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin/clipfit"
-
-# --- Tunables (edit these to change behavior everywhere the hotkey is used) ---
-# Longest-edge cap in pixels. Clears dimension limits (e.g. Kiro's 2000px).
-export CLIPFIT_MAX_DIM="${CLIPFIT_MAX_DIM:-1568}"
-# Output byte budget. 3.5mb -> ~4.66MB base64, comfortably under a 5MB limit.
-# Lower this (e.g. 3mb) for tools with a stricter filesize cap.
-export CLIPFIT_MAX_BYTES="${CLIPFIT_MAX_BYTES:-3.5mb}"
-# -----------------------------------------------------------------------------
-
-out="$("$CLIPFIT_BIN" --notify "$@" 2>&1)"
-status=$?
-
-# Breadcrumb for debugging: what happened on each press.
-echo "$(date '+%H:%M:%S') [exit $status] $out" >> /tmp/clipfit-hotkey.log
-
-# Audible feedback (reliable even when notifications are suppressed):
-#   success/handled -> Pop ; nothing-to-do/error -> Basso
-if [ "$status" -eq 0 ]; then
-    afplay /System/Library/Sounds/Pop.aiff >/dev/null 2>&1 &
+if command -v clipfit >/dev/null 2>&1; then
+    CLIPFIT_BIN="$(command -v clipfit)"
 else
-    afplay /System/Library/Sounds/Basso.aiff >/dev/null 2>&1 &
+    CLIPFIT_BIN="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin/clipfit"
 fi
+
+exec "$CLIPFIT_BIN" --quiet --notify --sound "$@"
