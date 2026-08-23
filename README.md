@@ -1,26 +1,27 @@
 # clipfit
 
-Shrink oversized clipboard images so LLM chats can actually read them.
+Shrink big clipboard images so LLM chats can read them.
 
-Many chat tools reject images on **two** axes: dimensions (e.g. Kiro skips
-images wider than 2000px) and filesize (e.g. a 5 MB base64 request limit).
-`clipfit` downscales the image on your clipboard so it fits **both** —
-preserving aspect ratio and text sharpness. Images already within the limits
-are left untouched.
+Chat tools reject images for two reasons: the image is too wide (Kiro skips
+anything over 2000px), or the file is too big (many tools cap a request at
+5 MB). clipfit resizes the image on your clipboard to fit both limits. It keeps
+the aspect ratio, and the text stays sharp. If the image is already small
+enough, clipfit leaves it alone.
 
-It's **opt-in per image** — you copy exactly as before, and only fire clipfit
-(via a hotkey) when the image is headed for an LLM. Nothing runs on every copy.
+You run it per image. Copy the way you always do, then press a hotkey only when
+the image is going to an LLM. Nothing runs on every copy.
 
 ## How it fits the limits
 
-1. Cap the longest edge at `--max-dim` (default 1568px).
-2. Keep a full-quality lossless PNG if it fits `--max-bytes`.
-3. If not, try a 256-color palette PNG (near-lossless for screenshots/UI).
-4. If still too big, step the resolution down until it fits.
+1. Shrink the longest edge to `--max-dim` (default 1568px).
+2. Keep a full-quality PNG if it fits `--max-bytes`.
+3. If it does not fit, try a 256-color PNG. This stays sharp for screenshots
+   and UI.
+4. If it still does not fit, lower the resolution until it does.
 
-Output is always PNG, so it pastes reliably into native macOS apps and
-Electron/Chromium chat inputs alike (both TIFF and PNG are written to the
-clipboard).
+The output is always PNG. clipfit puts both a TIFF and a PNG on the clipboard,
+so the image pastes into native Mac apps and into Electron or Chromium chat
+boxes.
 
 ## Install
 
@@ -30,39 +31,39 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-Requires macOS (uses `NSPasteboard` via pyobjc) and Python 3.9+.
+Needs macOS (it uses `NSPasteboard` through pyobjc) and Python 3.9 or newer.
 
 ## Usage
 
 ```bash
 clipfit                    # shrink the clipboard image in place
-clipfit --max-dim 2000     # different longest-edge cap
-clipfit --max-bytes 3.5mb  # different byte budget (keeps base64 under limits)
-clipfit --quiet --notify   # no terminal output, show a macOS notification (hotkey mode)
-clipfit path/to/img.png    # shrink a file instead -> writes img_fit.png
+clipfit --max-dim 2000     # set a different longest-edge cap
+clipfit --max-bytes 3.5mb  # set a different size budget
+clipfit --quiet --notify   # no terminal output, show a macOS notification (for a hotkey)
+clipfit path/to/img.png    # shrink a file instead; writes img_fit.png
 ```
 
-The default cap is **1568px** — most vision models downsample to about that
-size internally, so going lower shrinks filesize with basically no quality loss
-to the model. The default byte budget is **~3.7MB** so the base64-encoded image
-stays under a common 5MB request limit. Override with `--max-dim` / `--max-bytes`
-or the `CLIPFIT_MAX_DIM` / `CLIPFIT_MAX_BYTES` env vars.
+The default cap is 1568px. Most vision models shrink images to about that size
+anyway, so a lower cap saves space with no real quality loss to the model. The
+default size budget is about 3.7MB, which keeps the base64 image under a common
+5 MB limit. Change either one with `--max-dim` and `--max-bytes`, or with the
+`CLIPFIT_MAX_DIM` and `CLIPFIT_MAX_BYTES` environment variables.
 
-## Bind a hotkey (the intended flow)
+## Bind a hotkey
 
-Point a keyboard shortcut at `bin/clipfit-hotkey`. Then: screenshot as usual
-→ hit the shortcut → paste. Only that keypress touches the clipboard.
+Point a keyboard shortcut at `bin/clipfit-hotkey`. Take a screenshot as usual,
+press the shortcut, then paste. Only that keypress touches the clipboard.
 
-Pick whichever hotkey mechanism you already use:
+Use whichever hotkey tool you already have.
 
-**skhd** (`brew install skhd`) — add to `~/.config/skhd/skhdrc`:
+skhd (`brew install skhd`), in `~/.config/skhd/skhdrc`:
 
 ```
-# ⌥⇧V -> shrink clipboard image for LLMs
+# Option+Shift+V: shrink the clipboard image for LLMs
 alt + shift - v : /Users/aman/Developer/clipfit/bin/clipfit-hotkey
 ```
 
-**Hammerspoon** — in `~/.hammerspoon/init.lua`:
+Hammerspoon, in `~/.hammerspoon/init.lua`:
 
 ```lua
 hs.hotkey.bind({"alt", "shift"}, "V", function()
@@ -70,16 +71,17 @@ hs.hotkey.bind({"alt", "shift"}, "V", function()
 end)
 ```
 
-**Automator Quick Action** — New → Quick Action → "no input" → Run Shell Script
-`/Users/aman/Developer/clipfit/bin/clipfit-hotkey`, save, then assign a shortcut
-in System Settings → Keyboard → Keyboard Shortcuts → Services.
+Automator Quick Action: New, then Quick Action, set input to "no input", add a
+Run Shell Script step that runs `/Users/aman/Developer/clipfit/bin/clipfit-hotkey`,
+save it, then assign a shortcut in System Settings, Keyboard, Keyboard
+Shortcuts, Services.
 
 ## Notes
 
-- Coexists with Maccy: after clipfit rewrites the clipboard, Maccy stores the
-  shrunk version (usually what you want).
-- Non-destructive to originals only in file mode; clipboard mode replaces the
-  clipboard contents. If you want the full-res copy kept, grab it from Maccy.
+- Works with Maccy. After clipfit replaces the clipboard, Maccy stores the
+  smaller image, which is usually what you want.
+- File mode keeps your original and writes a new `_fit.png` file. Clipboard
+  mode replaces the clipboard. To keep the full-size copy, grab it from Maccy.
 
 ## Test
 
