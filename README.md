@@ -27,6 +27,9 @@
 
 ---
 
+> [!IMPORTANT]
+> clipfit is macOS only. It uses the macOS clipboard, and skhd for the hotkey, so it does not run on Windows or Linux.
+
 ## See it
 
 Chat tools reject images for two reasons: the image is too wide (Kiro skips
