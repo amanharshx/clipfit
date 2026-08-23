@@ -1,7 +1,7 @@
 <h1 align="center">🖼️🤏 clipfit</h1>
 
 <p align="center">
-  <strong>Fewer pixels, fewer tokens, same readable image. Made for pasting into LLMs.</strong>
+  <strong>Fewer pixels, fewer tokens, same readable image. Made for pasting images into LLMs.</strong>
 </p>
 
 <p align="center">
