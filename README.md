@@ -23,6 +23,18 @@ The output is always PNG. clipfit puts both a TIFF and a PNG on the clipboard,
 so the image pastes into native Mac apps and into Electron or Chromium chat
 boxes.
 
+## Large and ultrawide displays
+
+Screen size does not matter. clipfit caps the longest edge, so a bigger capture
+just shrinks more. A full 8K grab (7680 x 4320, about 86MB) comes out at
+1568 x 882 and under 5MB, in about half a second. The slow part is decoding the
+large source, so very big images take a bit longer than a laptop screenshot.
+
+Ultrawide is the one trade-off. A 5120 x 1440 screen shrinks to 1568 x 441. It
+fits and pastes, but 441px tall makes the text small and harder for the model
+to read. That is what capping the width does to a very wide image. On such a
+screen, capture a window or a region instead of the full width.
+
 ## Install
 
 ```bash
