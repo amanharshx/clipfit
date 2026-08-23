@@ -33,6 +33,10 @@ python3 -m venv .venv
 
 Needs macOS (it uses `NSPasteboard` through pyobjc) and Python 3.9 or newer.
 
+Developed and tested on a MacBook Air (15-inch, M4), 2880 x 1864 display. It
+does not depend on screen size, so it should work on any Mac. clipfit only
+looks at the image, not the display.
+
 ## Usage
 
 ```bash
