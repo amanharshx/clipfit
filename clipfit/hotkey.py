@@ -141,16 +141,20 @@ def _strip_block(text: str) -> str:
 
 
 def clipfit_binary() -> str:
-    """Absolute path to the clipfit executable, for use in the skhd binding."""
-    argv0 = Path(sys.argv[0]).resolve()
-    if argv0.name == "clipfit" and argv0.exists():
-        return str(argv0)
+    """Path to the clipfit executable for the skhd binding.
+
+    Prefer the stable PATH entry (e.g. /opt/homebrew/bin/clipfit) and do NOT
+    resolve symlinks, so a Homebrew upgrade that changes the Cellar version does
+    not break the binding.
+    """
     found = shutil.which("clipfit")
     if found:
-        return str(Path(found).resolve())
+        return found
+    argv0 = Path(sys.argv[0])
+    if argv0.name == "clipfit":
+        return str(argv0 if argv0.is_absolute() else argv0.resolve())
     # Dev fallback: console script alongside the current interpreter.
-    candidate = Path(sys.executable).parent / "clipfit"
-    return str(candidate)
+    return str(Path(sys.executable).parent / "clipfit")
 
 
 def _binding_command() -> str:
