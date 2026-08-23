@@ -28,7 +28,7 @@
 ---
 
 > [!IMPORTANT]
-> clipfit is macOS only. It uses the macOS clipboard, and skhd for the hotkey, so it does not run on Windows or Linux.
+> clipfit is **macOS** only. It uses the macOS clipboard, and skhd for the hotkey, so it does not run on Windows or Linux.
 
 ## See it
 
