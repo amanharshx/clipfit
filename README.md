@@ -13,7 +13,6 @@
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="Platform macOS">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-7%20passing-brightgreen" alt="Tests">
 </p>
 
 <p align="center">
@@ -67,17 +66,34 @@ clipfit --quiet --notify   # no terminal output, show a macOS notification (for 
 clipfit path/to/img.png    # shrink a file instead; writes img_fit.png
 ```
 
-The default cap is 1568px. Most vision models shrink images to about that size
-anyway, so a lower cap saves space with no real quality loss to the model. The
-default size budget is about 3.7MB, which keeps the base64 image under a common
-5 MB limit. Change either one with `--max-dim` and `--max-bytes`, or with the
-`CLIPFIT_MAX_DIM` and `CLIPFIT_MAX_BYTES` environment variables.
+Change either cap with `--max-dim` and `--max-bytes`, or with the
+`CLIPFIT_MAX_DIM` and `CLIPFIT_MAX_BYTES` environment variables. The defaults
+are 1568px and about 3.7MB; the reasoning is below.
+
+## Why these defaults
+
+**1568px longest edge.** Most vision models downsample images to roughly this
+size before they look at them. Capping here shrinks the file with no real
+quality loss to the model, and it clears width limits like Kiro's 2000px.
+
+**~3.7 MB byte budget.** This targets the strictest common limit: the Claude
+API rejects any image larger than 5 MB *after base64 encoding*. That is the
+exact error you get in Kiro (which runs Claude): `image exceeds 5 MB maximum`.
+Base64 makes an image about 33% bigger (4/3), so to keep the encoded image
+under 5 MB the raw image must stay under ~3.9 MB. clipfit aims for 3.7 MB to
+leave a margin.
+
+Other tools set different limits (OpenAI allows about 20 MB, for example). If
+yours is stricter or looser, change `--max-bytes` or `CLIPFIT_MAX_BYTES`.
 
 ## Bind a hotkey
 
 Point a keyboard shortcut at `bin/clipfit-hotkey`. Take a screenshot as usual,
 press the shortcut, then paste. Only that keypress touches the clipboard. You
 hear a short sound on success, since macOS can hide notifications.
+
+In the examples below, replace `/path/to/clipfit` with the full path to your
+clone (run `pwd` inside the repo to get it).
 
 <details>
 <summary><strong>skhd</strong> (recommended, lightest)</summary>
@@ -86,7 +102,7 @@ hear a short sound on success, since macOS can hide notifications.
 
 ```
 # Option+Shift+V: shrink the clipboard image for LLMs
-alt + shift - v : /Users/aman/Developer/clipfit/bin/clipfit-hotkey
+alt + shift - v : /path/to/clipfit/bin/clipfit-hotkey
 ```
 
 Start it as a login service with `skhd --start-service`. macOS will ask for
@@ -102,7 +118,7 @@ In `~/.hammerspoon/init.lua`:
 
 ```lua
 hs.hotkey.bind({"alt", "shift"}, "V", function()
-  hs.task.new("/Users/aman/Developer/clipfit/bin/clipfit-hotkey", nil):start()
+  hs.task.new("/path/to/clipfit/bin/clipfit-hotkey", nil):start()
 end)
 ```
 
@@ -112,7 +128,7 @@ end)
 <summary><strong>Automator Quick Action</strong> (no install)</summary>
 
 New, then Quick Action, set input to "no input", add a Run Shell Script step
-that runs `/Users/aman/Developer/clipfit/bin/clipfit-hotkey`, save it, then
+that runs `/path/to/clipfit/bin/clipfit-hotkey`, save it, then
 assign a shortcut in System Settings, Keyboard, Keyboard Shortcuts, Services.
 
 </details>
@@ -143,6 +159,14 @@ Ultrawide is the one trade-off. A 5120 x 1440 screen shrinks to 1568 x 441. It
 fits and pastes, but 441px tall makes the text small and harder for the model
 to read. That is what capping the width does to a very wide image. On such a
 screen, capture a window or a region instead of the full width.
+
+## Limitations
+
+- macOS only. It reads and writes the clipboard through `NSPasteboard`.
+- Clipboard mode replaces the clipboard with the smaller image. Your original
+  full-size copy stays in Maccy's history if you use it.
+- Very wide (ultrawide) full-screen grabs end up short after the width cap; see
+  above.
 
 ## Notes
 
