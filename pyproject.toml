@@ -4,10 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clipfit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shrink oversized clipboard images so LLM chats can read them."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.9"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "Pillow>=10",
     "pyobjc-framework-Cocoa>=9; sys_platform == 'darwin'",

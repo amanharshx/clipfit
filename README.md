@@ -1,43 +1,51 @@
-# clipfit
+<h1 align="center">🖼️🤏 clipfit</h1>
 
-Shrink big clipboard images so LLM chats can read them.
+<p align="center">
+  <strong>Shrink big clipboard images so LLM chats can read them.</strong>
+</p>
+
+<p align="center">
+  One hotkey resizes the screenshot on your clipboard to fit an LLM's size
+  limits, then you paste as usual. Aspect ratio kept, text stays sharp.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
+  <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="Platform macOS">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+  <img src="https://img.shields.io/badge/tests-7%20passing-brightgreen" alt="Tests">
+</p>
+
+<p align="center">
+  <a href="#see-it">See it</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#bind-a-hotkey">Hotkey</a> ·
+  <a href="#how-it-fits-the-limits">How it works</a> ·
+  <a href="#large-and-ultrawide-displays">Big displays</a>
+</p>
+
+---
+
+## See it
 
 Chat tools reject images for two reasons: the image is too wide (Kiro skips
 anything over 2000px), or the file is too big (many tools cap a request at
-5 MB). clipfit resizes the image on your clipboard to fit both limits. It keeps
-the aspect ratio, and the text stays sharp. If the image is already small
-enough, clipfit leaves it alone.
+5 MB). clipfit fixes both. If the image is already small enough, it does
+nothing.
+
+| Before | After clipfit |
+| --- | --- |
+| 3420 x 2214, ~1 MB screenshot | 1568 x 1015, fits the 2000px and 5 MB limits |
+| 7680 x 4320 (8K), 86 MB | 1568 x 882, base64 under 5 MB, in about half a second |
 
 You run it per image. Copy the way you always do, then press a hotkey only when
 the image is going to an LLM. Nothing runs on every copy.
 
-## How it fits the limits
-
-1. Shrink the longest edge to `--max-dim` (default 1568px).
-2. Keep a full-quality PNG if it fits `--max-bytes`.
-3. If it does not fit, try a 256-color PNG. This stays sharp for screenshots
-   and UI.
-4. If it still does not fit, lower the resolution until it does.
-
-The output is always PNG. clipfit puts both a TIFF and a PNG on the clipboard,
-so the image pastes into native Mac apps and into Electron or Chromium chat
-boxes.
-
-## Large and ultrawide displays
-
-Screen size does not matter. clipfit caps the longest edge, so a bigger capture
-just shrinks more. A full 8K grab (7680 x 4320, about 86MB) comes out at
-1568 x 882 and under 5MB, in about half a second. The slow part is decoding the
-large source, so very big images take a bit longer than a laptop screenshot.
-
-Ultrawide is the one trade-off. A 5120 x 1440 screen shrinks to 1568 x 441. It
-fits and pastes, but 441px tall makes the text small and harder for the model
-to read. That is what capping the width does to a very wide image. On such a
-screen, capture a window or a region instead of the full width.
-
 ## Install
 
 ```bash
+git clone https://github.com/amanharshx/clipfit.git
 cd clipfit
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -68,18 +76,29 @@ default size budget is about 3.7MB, which keeps the base64 image under a common
 ## Bind a hotkey
 
 Point a keyboard shortcut at `bin/clipfit-hotkey`. Take a screenshot as usual,
-press the shortcut, then paste. Only that keypress touches the clipboard.
+press the shortcut, then paste. Only that keypress touches the clipboard. You
+hear a short sound on success, since macOS can hide notifications.
 
-Use whichever hotkey tool you already have.
+<details>
+<summary><strong>skhd</strong> (recommended, lightest)</summary>
 
-skhd (`brew install skhd`), in `~/.config/skhd/skhdrc`:
+`brew install skhd`, then add to `~/.config/skhd/skhdrc`:
 
 ```
 # Option+Shift+V: shrink the clipboard image for LLMs
 alt + shift - v : /Users/aman/Developer/clipfit/bin/clipfit-hotkey
 ```
 
-Hammerspoon, in `~/.hammerspoon/init.lua`:
+Start it as a login service with `skhd --start-service`. macOS will ask for
+Accessibility permission the first time; grant it to skhd in System Settings,
+Privacy & Security, Accessibility.
+
+</details>
+
+<details>
+<summary><strong>Hammerspoon</strong></summary>
+
+In `~/.hammerspoon/init.lua`:
 
 ```lua
 hs.hotkey.bind({"alt", "shift"}, "V", function()
@@ -87,10 +106,43 @@ hs.hotkey.bind({"alt", "shift"}, "V", function()
 end)
 ```
 
-Automator Quick Action: New, then Quick Action, set input to "no input", add a
-Run Shell Script step that runs `/Users/aman/Developer/clipfit/bin/clipfit-hotkey`,
-save it, then assign a shortcut in System Settings, Keyboard, Keyboard
-Shortcuts, Services.
+</details>
+
+<details>
+<summary><strong>Automator Quick Action</strong> (no install)</summary>
+
+New, then Quick Action, set input to "no input", add a Run Shell Script step
+that runs `/Users/aman/Developer/clipfit/bin/clipfit-hotkey`, save it, then
+assign a shortcut in System Settings, Keyboard, Keyboard Shortcuts, Services.
+
+</details>
+
+The wrapper has a tunable block at the top. Change `CLIPFIT_MAX_DIM` or
+`CLIPFIT_MAX_BYTES` there to adjust the caps for every press.
+
+## How it fits the limits
+
+1. Shrink the longest edge to `--max-dim` (default 1568px).
+2. Keep a full-quality PNG if it fits `--max-bytes`.
+3. If it does not fit, try a 256-color PNG. This stays sharp for screenshots
+   and UI.
+4. If it still does not fit, lower the resolution until it does.
+
+The output is always PNG. clipfit puts both a TIFF and a PNG on the clipboard,
+so the image pastes into native Mac apps and into Electron or Chromium chat
+boxes.
+
+## Large and ultrawide displays
+
+Screen size does not matter. clipfit caps the longest edge, so a bigger capture
+just shrinks more. A full 8K grab (7680 x 4320, about 86MB) comes out at
+1568 x 882 and under 5MB, in about half a second. The slow part is decoding the
+large source, so very big images take a bit longer than a laptop screenshot.
+
+Ultrawide is the one trade-off. A 5120 x 1440 screen shrinks to 1568 x 441. It
+fits and pastes, but 441px tall makes the text small and harder for the model
+to read. That is what capping the width does to a very wide image. On such a
+screen, capture a window or a region instead of the full width.
 
 ## Notes
 
@@ -105,3 +157,7 @@ Shortcuts, Services.
 .venv/bin/pip install pytest
 .venv/bin/python -m pytest
 ```
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
