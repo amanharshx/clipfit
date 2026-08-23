@@ -1,10 +1,24 @@
 #!/bin/bash
 # clipfit hotkey wrapper.
-# Bind a keyboard shortcut to this script (via skhd, Hammerspoon, Raycast,
-# Automator Quick Action, etc.). It shrinks the current clipboard image in
-# place and shows a macOS notification with the result.
+# Bind a keyboard shortcut to this script. It shrinks the current clipboard
+# image in place and gives feedback via sound + notification.
 #
-# Only images larger than the cap are changed; anything else is left alone.
+# Feedback is intentionally redundant: macOS notifications can be silently
+# suppressed by Focus/Do Not Disturb or lack of permission when launched from
+# skhd, so we also play a short sound.
 
 CLIPFIT_BIN="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin/clipfit"
-exec "$CLIPFIT_BIN" --quiet --notify "$@"
+
+out="$("$CLIPFIT_BIN" --notify "$@" 2>&1)"
+status=$?
+
+# Breadcrumb for debugging: what happened on each press.
+echo "$(date '+%H:%M:%S') [exit $status] $out" >> /tmp/clipfit-hotkey.log
+
+# Audible feedback (reliable even when notifications are suppressed):
+#   success/handled -> Pop ; nothing-to-do/error -> Basso
+if [ "$status" -eq 0 ]; then
+    afplay /System/Library/Sounds/Pop.aiff >/dev/null 2>&1 &
+else
+    afplay /System/Library/Sounds/Basso.aiff >/dev/null 2>&1 &
+fi

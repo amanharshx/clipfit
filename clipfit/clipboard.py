@@ -9,6 +9,7 @@ from __future__ import annotations
 try:
     from AppKit import (
         NSData,
+        NSImage,
         NSPasteboard,
         NSPasteboardTypePNG,
         NSPasteboardTypeTIFF,
@@ -59,7 +60,21 @@ def write_png(png_bytes: bytes) -> int:
     pb = NSPasteboard.generalPasteboard()
     ns_data = NSData.dataWithBytes_length_(png_bytes, len(png_bytes))
     pb.clearContents()
-    ok = pb.setData_forType_(ns_data, NSPasteboardTypePNG)
-    if not ok:
+
+    # Write BOTH TIFF and PNG. Native macOS apps typically paste from TIFF,
+    # while Electron/Chromium-based apps prefer PNG. Providing both makes the
+    # shrunk image pasteable everywhere instead of depending on the target app.
+    wrote_any = False
+
+    image = NSImage.alloc().initWithData_(ns_data)
+    if image is not None:
+        tiff = image.TIFFRepresentation()
+        if tiff is not None and pb.setData_forType_(tiff, NSPasteboardTypeTIFF):
+            wrote_any = True
+
+    if pb.setData_forType_(ns_data, NSPasteboardTypePNG):
+        wrote_any = True
+
+    if not wrote_any:
         raise ClipboardError("failed to write image data to the clipboard")
     return int(pb.changeCount())
