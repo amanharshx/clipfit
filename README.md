@@ -46,6 +46,21 @@ the image is going to an LLM. Nothing runs on every copy.
 ## Install
 
 ```bash
+brew install amanharshx/tap/clipfit
+```
+
+This also installs skhd (used for the hotkey). Prebuilt wheels are used, so the
+install takes seconds, not minutes.
+
+With pipx instead:
+
+```bash
+pipx install git+https://github.com/amanharshx/clipfit
+```
+
+From source (for development):
+
+```bash
 git clone https://github.com/amanharshx/clipfit.git
 cd clipfit
 python3 -m venv .venv
@@ -64,8 +79,11 @@ looks at the image, not the display.
 clipfit                    # shrink the clipboard image in place
 clipfit --max-dim 2000     # set a different longest-edge cap
 clipfit --max-bytes 3.5mb  # set a different size budget
-clipfit --quiet --notify   # no terminal output, show a macOS notification (for a hotkey)
 clipfit path/to/img.png    # shrink a file instead; writes img_fit.png
+
+clipfit hotkey set         # pick or change the shortcut (interactive)
+clipfit hotkey show        # show the current shortcut and status
+clipfit hotkey remove      # remove the shortcut
 ```
 
 Change either cap with `--max-dim` and `--max-bytes`, or with the
@@ -90,53 +108,37 @@ yours is stricter or looser, change `--max-bytes` or `CLIPFIT_MAX_BYTES`.
 
 ## Bind a hotkey
 
-Point a keyboard shortcut at `bin/clipfit-hotkey`. Take a screenshot as usual,
-press the shortcut, then paste. Only that keypress touches the clipboard. You
-hear a short sound on success, since macOS can hide notifications.
+The simplest way, once installed:
 
-In the examples below, replace `/path/to/clipfit` with the full path to your
-clone (run `pwd` inside the repo to get it).
-
-<details>
-<summary><strong>skhd</strong> (recommended, lightest)</summary>
-
-`brew install skhd`, then add to `~/.config/skhd/skhdrc`:
-
-```
-# Option+Shift+V: shrink the clipboard image for LLMs
-alt + shift - v : /path/to/clipfit/bin/clipfit-hotkey
+```bash
+clipfit hotkey set
 ```
 
-Start it as a login service with `skhd --start-service`. macOS will ask for
-Accessibility permission the first time; grant it to skhd in System Settings,
-Privacy & Security, Accessibility.
+It asks for a shortcut (Enter accepts the default, Option+Shift+V), writes an
+skhd binding in a marked block in your `~/.config/skhd/skhdrc`, starts skhd, and
+opens the Accessibility pane so you can allow skhd. After that: copy an image,
+press the shortcut, then paste. Only that keypress touches the clipboard.
 
-</details>
+macOS asks you to grant skhd Accessibility once. No installer can do this for
+you; it is an OS security prompt. Run `clipfit hotkey show` to confirm the
+status afterward.
+
+Prefer a different launcher (Raycast, Hammerspoon, Karabiner, BetterTouchTool)?
+Bind its shortcut to run `clipfit --quiet --notify --sound`. clipfit shrinks the
+clipboard in place, so any launcher works.
 
 <details>
-<summary><strong>Hammerspoon</strong></summary>
+<summary>Hammerspoon example</summary>
 
 In `~/.hammerspoon/init.lua`:
 
 ```lua
 hs.hotkey.bind({"alt", "shift"}, "V", function()
-  hs.task.new("/path/to/clipfit/bin/clipfit-hotkey", nil):start()
+  hs.task.new("/opt/homebrew/bin/clipfit", nil, {"--quiet", "--notify", "--sound"}):start()
 end)
 ```
 
 </details>
-
-<details>
-<summary><strong>Automator Quick Action</strong> (no install)</summary>
-
-New, then Quick Action, set input to "no input", add a Run Shell Script step
-that runs `/path/to/clipfit/bin/clipfit-hotkey`, save it, then
-assign a shortcut in System Settings, Keyboard, Keyboard Shortcuts, Services.
-
-</details>
-
-The wrapper has a tunable block at the top. Change `CLIPFIT_MAX_DIM` or
-`CLIPFIT_MAX_BYTES` there to adjust the caps for every press.
 
 ## How it fits the limits
 
@@ -180,8 +182,8 @@ screen, capture a window or a region instead of the full width.
 ## Test
 
 ```bash
-.venv/bin/pip install pytest
-.venv/bin/python -m pytest
+pip install pytest
+pytest
 ```
 
 ## License
