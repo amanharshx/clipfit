@@ -1,12 +1,13 @@
 <h1 align="center">🖼️🤏 clipfit</h1>
 
 <p align="center">
-  <strong>Shrink big clipboard images so LLM chats can read them.</strong>
+  <strong>Fewer pixels, fewer tokens, same readable image. Made for pasting into LLMs.</strong>
 </p>
 
 <p align="center">
-  One hotkey resizes the screenshot on your clipboard to fit an LLM's size
-  limits, then you paste as usual. Aspect ratio kept, text stays sharp.
+  One hotkey resizes the screenshot on your clipboard so it fits an LLM's size
+  limits and costs fewer tokens, then you paste as usual. Aspect ratio kept,
+  text stays sharp.
 </p>
 
 <p align="center">
@@ -30,8 +31,9 @@
 
 Chat tools reject images for two reasons: the image is too wide (Kiro skips
 anything over 2000px), or the file is too big (many tools cap a request at
-5 MB). clipfit fixes both. If the image is already small enough, it does
-nothing.
+5 MB). clipfit fixes both. A smaller image also costs fewer tokens, so it uses
+less of the chat's context even when the model could read the big one. If the
+image is already small enough, clipfit does nothing.
 
 | Before | After clipfit |
 | --- | --- |
