@@ -2,14 +2,25 @@
 
 Shrink oversized clipboard images so LLM chats can actually read them.
 
-Many chat tools silently drop or mangle images past a size limit (e.g. Kiro
-skips images wider than 2000px), which breaks the "screenshot → paste into an
-LLM" workflow. `clipfit` downscales the image on your clipboard so its longest
-edge fits under a cap, **preserving aspect ratio and text sharpness**. Images
-already within the limit are left untouched.
+Many chat tools reject images on **two** axes: dimensions (e.g. Kiro skips
+images wider than 2000px) and filesize (e.g. a 5 MB base64 request limit).
+`clipfit` downscales the image on your clipboard so it fits **both** —
+preserving aspect ratio and text sharpness. Images already within the limits
+are left untouched.
 
 It's **opt-in per image** — you copy exactly as before, and only fire clipfit
 (via a hotkey) when the image is headed for an LLM. Nothing runs on every copy.
+
+## How it fits the limits
+
+1. Cap the longest edge at `--max-dim` (default 1568px).
+2. Keep a full-quality lossless PNG if it fits `--max-bytes`.
+3. If not, try a 256-color palette PNG (near-lossless for screenshots/UI).
+4. If still too big, step the resolution down until it fits.
+
+Output is always PNG, so it pastes reliably into native macOS apps and
+Electron/Chromium chat inputs alike (both TIFF and PNG are written to the
+clipboard).
 
 ## Install
 
@@ -24,15 +35,18 @@ Requires macOS (uses `NSPasteboard` via pyobjc) and Python 3.9+.
 ## Usage
 
 ```bash
-clipfit                    # shrink the clipboard image in place (longest edge -> 1568px)
-clipfit --max-dim 2000     # use a different cap
+clipfit                    # shrink the clipboard image in place
+clipfit --max-dim 2000     # different longest-edge cap
+clipfit --max-bytes 3.5mb  # different byte budget (keeps base64 under limits)
 clipfit --quiet --notify   # no terminal output, show a macOS notification (hotkey mode)
 clipfit path/to/img.png    # shrink a file instead -> writes img_fit.png
 ```
 
 The default cap is **1568px** — most vision models downsample to about that
 size internally, so going lower shrinks filesize with basically no quality loss
-to the model. Override with `--max-dim` or the `CLIPFIT_MAX_DIM` env var.
+to the model. The default byte budget is **~3.7MB** so the base64-encoded image
+stays under a common 5MB request limit. Override with `--max-dim` / `--max-bytes`
+or the `CLIPFIT_MAX_DIM` / `CLIPFIT_MAX_BYTES` env vars.
 
 ## Bind a hotkey (the intended flow)
 
