@@ -91,7 +91,7 @@ clipfit hotkey remove      # remove the shortcut
 
 Change either cap with `--max-dim` and `--max-bytes`, or with the
 `CLIPFIT_MAX_DIM` and `CLIPFIT_MAX_BYTES` environment variables. The defaults
-are 1568px and about 3.7MB; the reasoning is below.
+are 1568px and about 3.7 MB; the reasoning is below.
 
 ## Why these defaults
 
@@ -158,8 +158,8 @@ boxes.
 ## Large and ultrawide displays
 
 Screen size does not matter. clipfit caps the longest edge, so a bigger capture
-just shrinks more. A full 8K grab (7680 x 4320, about 86MB) comes out at
-1568 x 882 and under 5MB, in about half a second. The slow part is decoding the
+just shrinks more. A full 8K grab (7680 x 4320, about 86 MB) comes out at
+1568 x 882 and under 5 MB, in about half a second. The slow part is decoding the
 large source, so very big images take a bit longer than a laptop screenshot.
 
 Ultrawide is the one trade-off. A 5120 x 1440 screen shrinks to 1568 x 441. It
@@ -167,20 +167,13 @@ fits and pastes, but 441px tall makes the text small and harder for the model
 to read. That is what capping the width does to a very wide image. On such a
 screen, capture a window or a region instead of the full width.
 
-## Limitations
-
-- macOS only. It reads and writes the clipboard through `NSPasteboard`.
-- Clipboard mode replaces the clipboard with the smaller image. Your original
-  full-size copy stays in Maccy's history if you use it.
-- Very wide (ultrawide) full-screen grabs end up short after the width cap; see
-  above.
-
 ## Notes
 
-- Works with Maccy. After clipfit replaces the clipboard, Maccy stores the
-  smaller image, which is usually what you want.
-- File mode keeps your original and writes a new `_fit.png` file. Clipboard
-  mode replaces the clipboard. To keep the full-size copy, grab it from Maccy.
+- Clipboard mode replaces the clipboard with the smaller image. Your original
+  full-size copy stays in Maccy's history, so nothing is lost.
+- File mode leaves the source file alone and writes a new `_fit.png` next to it.
+- Ultrawide full-screen grabs end up short after the width cap (see above);
+  capture a window or a region instead.
 
 ## Test
 
