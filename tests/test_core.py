@@ -185,18 +185,35 @@ def test_force_png_converts_jpeg_to_png():
         assert img.size == (800, 600)
 
 
-def test_original_bytes_can_be_the_png_size_not_processing_size():
-    # TIFF bytes are often larger than the PNG representation. Budget and
-    # summaries must use the original PNG size, not the processing payload.
+def test_original_bytes_is_report_only_and_does_not_skip_budget():
+    # A small original_bytes override must not pass through a large payload.
+    tiff_buf = io.BytesIO()
+    Image.effect_noise((400, 300), 120).convert("RGB").save(tiff_buf, format="TIFF")
+    tiff = tiff_buf.getvalue()
+    assert len(tiff) > 1024
+
+    out, res = shrink_image_bytes(
+        tiff, max_dim=1568, max_bytes=1024, original_bytes=1
+    )
+    assert len(out) <= 1024
+    assert res.new_bytes == len(out)
+    assert res.original_bytes == 1
+    assert res.changed
+
+
+def test_original_bytes_reports_png_size_when_processing_tiff():
     png = _png(4000, 3000)
     tiff_buf = io.BytesIO()
     Image.new("RGB", (4000, 3000), (120, 30, 200)).save(tiff_buf, format="TIFF")
     tiff = tiff_buf.getvalue()
-    assert len(tiff) > len(png)
-
-    _out, res = shrink_image_bytes(tiff, max_dim=1568, original_bytes=len(png))
+    out, res = shrink_image_bytes(
+        tiff, max_dim=1568, original_bytes=len(png), force_png=True
+    )
     assert res.original_bytes == len(png)
     assert res.changed
+    assert len(out) <= DEFAULT_MAX_BYTES
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "PNG"
 
 
 def test_force_png_applies_exif_orientation():

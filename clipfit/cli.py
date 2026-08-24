@@ -118,22 +118,24 @@ def _shrink_clipboard(max_dim: int, max_bytes: int, quiet: bool, notify: bool) -
     from . import clipboard
 
     try:
-        clip = clipboard.read_image()
+        got = clipboard.read_image(max_dim=max_dim, max_bytes=max_bytes)
     except clipboard.ClipboardError as exc:
         _report(str(exc), quiet=False, notify=notify)
         return 2
 
-    if clip is None:
+    if got is None:
         _report("no image on the clipboard - nothing to do", quiet, notify)
         return 1
 
+    data, original_bytes = got
+    force_png = clipboard.png_header_size(data) is None
     try:
-        processing = clip.bytes_for_processing(max_dim=max_dim, max_bytes=max_bytes)
         new_data, result = shrink_image_bytes(
-            processing,
+            data,
             max_dim=max_dim,
             max_bytes=max_bytes,
-            original_bytes=clip.original_byte_count(processing),
+            original_bytes=original_bytes,
+            force_png=force_png,
         )
     except (ClipfitImageError, ByteBudgetError) as exc:
         _report(str(exc), quiet=False, notify=notify)

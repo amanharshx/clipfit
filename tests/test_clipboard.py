@@ -15,7 +15,7 @@ def _big_png(w=3000, h=2000) -> bytes:
 
 
 def test_no_clipboard_image(monkeypatch, capsys):
-    monkeypatch.setattr(clipboard, "read_image", lambda: None)
+    monkeypatch.setattr(clipboard, "read_image", lambda *a, **k: None)
     rc = cli.main([])
     assert rc == 1
     assert "no image on the clipboard" in capsys.readouterr().out
@@ -23,10 +23,11 @@ def test_no_clipboard_image(monkeypatch, capsys):
 
 def test_clipboard_success_writes_shrunk(monkeypatch):
     written = {}
+    png = _big_png()
     monkeypatch.setattr(
         clipboard,
         "read_image",
-        lambda: clipboard.ClipboardImage(png=_big_png(), tiff=None),
+        lambda *a, **k: (png, len(png)),
     )
     monkeypatch.setattr(clipboard, "write_png", lambda data: written.setdefault("data", data))
     rc = cli.main([])
@@ -38,7 +39,7 @@ def test_clipboard_success_writes_shrunk(monkeypatch):
 
 
 def test_clipboard_read_error(monkeypatch, capsys):
-    def boom():
+    def boom(*_a, **_k):
         raise clipboard.ClipboardError("no pyobjc")
     monkeypatch.setattr(clipboard, "read_image", boom)
     assert cli.main([]) == 2
@@ -46,10 +47,11 @@ def test_clipboard_read_error(monkeypatch, capsys):
 
 
 def test_clipboard_write_error(monkeypatch, capsys):
+    png = _big_png()
     monkeypatch.setattr(
         clipboard,
         "read_image",
-        lambda: clipboard.ClipboardImage(png=_big_png(), tiff=None),
+        lambda *a, **k: (png, len(png)),
     )
 
     def boom(_data):
@@ -70,9 +72,11 @@ class FakePasteboard:
         self.types = dict(types or {})
         self.write_ok = write_ok
         self.writes = []
+        self.fetches = []
         self._change = 1
 
     def dataForType_(self, pb_type):
+        self.fetches.append(pb_type)
         return self.types.get(pb_type)
 
     def clearContents(self):
@@ -114,7 +118,7 @@ def test_png_header_size_rejects_truncated():
 
 
 @needs_appkit
-def test_read_image_returns_both_representations():
+def test_small_png_skips_tiff_fetch():
     png = _small_png()
     tiff = _tiff(8, 8)
     pb = FakePasteboard(
@@ -123,65 +127,56 @@ def test_read_image_returns_both_representations():
             clipboard.NSPasteboardTypeTIFF: tiff,
         }
     )
-    got = clipboard.read_image(pasteboard=pb)
-    assert got is not None
-    assert got.png == png
-    assert got.tiff == tiff
+    got = clipboard.read_image(pasteboard=pb, max_dim=1568, max_bytes=3_700_000)
+    assert got == (png, len(png))
+    assert clipboard.NSPasteboardTypeTIFF not in pb.fetches
 
 
 @needs_appkit
-def test_small_png_within_limits_is_processing_bytes():
-    png = _small_png()
-    tiff = _tiff(8, 8)
-    clip = clipboard.ClipboardImage(png=png, tiff=tiff)
-    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == png
-
-
-@needs_appkit
-def test_oversized_png_uses_tiff_when_available():
+def test_oversized_png_fetches_tiff():
     png = _big_png()
     tiff = _tiff(3000, 2000)
-    clip = clipboard.ClipboardImage(png=png, tiff=tiff)
-    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == tiff
+    pb = FakePasteboard(
+        types={
+            clipboard.NSPasteboardTypePNG: png,
+            clipboard.NSPasteboardTypeTIFF: tiff,
+        }
+    )
+    data, original = clipboard.read_image(
+        pasteboard=pb, max_dim=1568, max_bytes=3_700_000
+    )
+    assert data == tiff
+    assert original == len(png)
+    assert clipboard.NSPasteboardTypeTIFF in pb.fetches
 
 
 @needs_appkit
 def test_oversized_png_without_tiff_uses_png():
     png = _big_png()
-    clip = clipboard.ClipboardImage(png=png, tiff=None)
-    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == png
+    pb = FakePasteboard(types={clipboard.NSPasteboardTypePNG: png})
+    data, original = clipboard.read_image(
+        pasteboard=pb, max_dim=1568, max_bytes=3_700_000
+    )
+    assert data == png
+    assert original == len(png)
 
 
 @needs_appkit
 def test_tiff_only_uses_tiff():
     tiff = _tiff(3000, 2000)
-    clip = clipboard.ClipboardImage(png=None, tiff=tiff)
-    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == tiff
-
-
-@needs_appkit
-def test_read_prefers_png_over_tiff():
-    png = _small_png()
-    tiff = _tiff(8, 8)
-    pb = FakePasteboard(
-        types={
-            clipboard.NSPasteboardTypePNG: png,
-            clipboard.NSPasteboardTypeTIFF: tiff,
-        }
+    pb = FakePasteboard(types={clipboard.NSPasteboardTypeTIFF: tiff})
+    data, original = clipboard.read_image(
+        pasteboard=pb, max_dim=1568, max_bytes=3_700_000
     )
-    got = clipboard.read_image(pasteboard=pb)
-    assert got is not None
-    assert got.png == png
+    assert data == tiff
+    assert original == len(tiff)
 
 
 @needs_appkit
 def test_read_falls_back_to_tiff():
     tiff = b"tiff-only"
     pb = FakePasteboard(types={clipboard.NSPasteboardTypeTIFF: tiff})
-    got = clipboard.read_image(pasteboard=pb)
-    assert got is not None
-    assert got.png is None
-    assert got.tiff == tiff
+    assert clipboard.read_image(pasteboard=pb) == (tiff, len(tiff))
 
 
 @needs_appkit
@@ -217,11 +212,11 @@ def test_unique_pasteboard_roundtrip():
     try:
         png = _small_png()
         clipboard.write_png(png, pasteboard=pb)
-        got = clipboard.read_image(pasteboard=pb)
-        assert got is not None
-        assert got.png is not None
-        with Image.open(io.BytesIO(got.png)) as img:
+        data, original = clipboard.read_image(pasteboard=pb)
+        assert data is not None
+        with Image.open(io.BytesIO(data)) as img:
             assert img.format == "PNG"
             assert img.size == (8, 8)
+        assert original == len(data)
     finally:
         pb.releaseGlobally()

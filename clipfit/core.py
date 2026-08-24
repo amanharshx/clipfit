@@ -120,8 +120,9 @@ def shrink_image_bytes(
     Raises ByteBudgetError only when no PNG fits, which needs a budget smaller
     than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
     """
+    payload_bytes = len(data)
     if original_bytes is None:
-        original_bytes = len(data)
+        original_bytes = payload_bytes
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.load()
@@ -135,14 +136,15 @@ def shrink_image_bytes(
     longest = max(ow, oh)
 
     # Fast path: already within both limits -> leave it completely alone.
-    # Skipped when force_png is set, so file mode always produces a PNG.
-    if not force_png and longest <= max_dim and original_bytes <= max_bytes:
+    # Pass-through uses the payload size, not original_bytes (that field is
+    # report-only). Skipped when force_png is set, so file mode always PNG.
+    if not force_png and longest <= max_dim and payload_bytes <= max_bytes:
         return data, ShrinkResult(
             changed=False,
             original_size=(ow, oh),
             new_size=(ow, oh),
             original_bytes=original_bytes,
-            new_bytes=original_bytes,
+            new_bytes=payload_bytes,
             note="no resize needed",
         )
 

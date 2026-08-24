@@ -6,7 +6,6 @@ errors are surfaced clearly so the CLI can guide install.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from struct import unpack
 
 from .core import DEFAULT_MAX_BYTES, DEFAULT_MAX_DIM
@@ -47,41 +46,6 @@ def png_header_size(data: bytes) -> tuple[int, int] | None:
     return width, height
 
 
-@dataclass
-class ClipboardImage:
-    png: bytes | None
-    tiff: bytes | None
-
-    def bytes_for_processing(
-        self,
-        max_dim: int = DEFAULT_MAX_DIM,
-        max_bytes: int = DEFAULT_MAX_BYTES,
-    ) -> bytes:
-        """Pick bytes to decode.
-
-        Small PNG that already fits both limits is returned unchanged so the
-        no-op path never sees raw TIFF size. Oversized images prefer TIFF
-        because it decodes much faster than PNG.
-        """
-        if self.png is not None:
-            size = png_header_size(self.png)
-            if size is not None:
-                longest = max(size)
-                if longest <= max_dim and len(self.png) <= max_bytes:
-                    return self.png
-            if self.tiff is not None:
-                return self.tiff
-            return self.png
-        if self.tiff is not None:
-            return self.tiff
-        raise ClipboardError("clipboard image has no PNG or TIFF data")
-
-    def original_byte_count(self, processing: bytes) -> int:
-        if self.png is not None:
-            return len(self.png)
-        return len(processing)
-
-
 def _ensure_appkit() -> None:
     if not _APPKIT_OK:
         raise ClipboardError(
@@ -95,22 +59,36 @@ def _pasteboard(pasteboard=None):
     return pasteboard if pasteboard is not None else NSPasteboard.generalPasteboard()
 
 
-def read_image(pasteboard=None) -> ClipboardImage | None:
-    """Return PNG and TIFF clipboard representations, or None if neither is set.
+def read_image(
+    pasteboard=None,
+    max_dim: int = DEFAULT_MAX_DIM,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> tuple[bytes, int] | None:
+    """Return (bytes to decode, original PNG byte count), or None if no image.
 
-    Selection of which bytes to decode happens in ClipboardImage so TIFF size
-    cannot break the small-image no-op path.
+    Reads PNG first. If that PNG already fits both limits, TIFF is not fetched.
+    Oversized images use TIFF when present. original byte count is always the
+    PNG size when a PNG exists, so TIFF size cannot break the no-op path.
     """
     _ensure_appkit()
     pb = _pasteboard(pasteboard)
 
     png_data = pb.dataForType_(NSPasteboardTypePNG)
-    tiff_data = pb.dataForType_(NSPasteboardTypeTIFF)
     png = bytes(png_data) if png_data is not None else None
-    tiff = bytes(tiff_data) if tiff_data is not None else None
-    if png is None and tiff is None:
-        return None
-    return ClipboardImage(png=png, tiff=tiff)
+    if png is not None:
+        size = png_header_size(png)
+        if size is not None and max(size) <= max_dim and len(png) <= max_bytes:
+            return png, len(png)
+        tiff_data = pb.dataForType_(NSPasteboardTypeTIFF)
+        if tiff_data is not None:
+            return bytes(tiff_data), len(png)
+        return png, len(png)
+
+    tiff_data = pb.dataForType_(NSPasteboardTypeTIFF)
+    if tiff_data is not None:
+        tiff = bytes(tiff_data)
+        return tiff, len(tiff)
+    return None
 
 
 def write_png(png_bytes: bytes, pasteboard=None) -> int:
