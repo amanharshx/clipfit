@@ -28,16 +28,18 @@ clipfit is a small macOS tool that shrinks the image on your clipboard so it is 
 
 ## What it does
 
-Chat tools reject images for two reasons: the image is too wide (Kiro skips
-anything over 2000px), or the file is too big (many tools cap a request at
-5 MB). clipfit fixes both. A smaller image also costs fewer tokens, so it uses
-less of the chat's context even when the model could read the big one. If the
-image is already small enough, clipfit does nothing.
+LLM chats handle large images differently. Some reject or silently skip
+oversized inputs: Amazon Q Developer caps image attachments at 3.75 MB,
+while Claude through Amazon Bedrock or Google Cloud caps base64-encoded
+images at 5 MB. Kiro has also been observed skipping images over 2000px.
+clipfit keeps screenshots below these strict limits and reduces upload size.
+Depending on the model, fewer pixels can also use fewer vision tokens. If the
+image already fits, clipfit does nothing.
 
 | Before | After clipfit |
 | --- | --- |
-| 3420 × 2214, ~1 MB screenshot | 1568 × 1015, fits the 2000px and 5 MB limits |
-| 7680 × 4320 (8K), 86 MB | 1568 × 882, base64 under 5 MB, in about half a second |
+| 3420 × 2214, ~1 MB screenshot | 1568 × 1015, fits strict common limits |
+| 7680 × 4320 (8K), 86 MB | 1568 × 882, under clipfit's byte budget, in about half a second |
 
 You run it per image. Copy the way you always do, then press a hotkey only when
 the image is going to an LLM. Nothing runs on every copy.
@@ -139,19 +141,21 @@ boxes.
 
 ## Why these defaults
 
-**1568px longest edge.** Most vision models downsample images to roughly this
-size before they look at them. Capping here shrinks the file with no real
-quality loss to the model, and it clears width limits like Kiro's 2000px.
+**1568px longest edge.** This matches the native long-edge limit used by
+standard-resolution Claude vision and stays below Kiro's observed 2000px
+cutoff. It also reduces upload time and can reduce vision-token use. Newer
+high-resolution models can process more detail, so increase `--max-dim` when
+working with dense diagrams or very small text.
 
-**~3.7 MB byte budget.** This targets the strictest common limit: the Claude
-API rejects any image larger than 5 MB *after base64 encoding*. That is the
-exact error you get in Kiro (which runs Claude): `image exceeds 5 MB maximum`.
-Base64 makes an image about 33% bigger (4/3), so to keep the encoded image
-under 5 MB the raw image must stay under ~3.9 MB. clipfit aims for 3.7 MB to
-leave a margin.
+**~3.7 MB byte budget.** Claude through Amazon Bedrock or Google Cloud limits
+each base64-encoded image to 5 MB. Base64 adds about 33% overhead, so the raw
+image must stay below roughly 3.9 MB. clipfit targets 3.7 MB to leave margin.
+That also fits Amazon Q Developer's 3.75 MB image-attachment limit.
 
-Other tools set different limits (OpenAI allows about 20 MB, for example). If
-yours is stricter or looser, change `--max-bytes` or `CLIPFIT_MAX_BYTES`.
+Other products allow larger uploads: direct Claude API accepts 10 MB
+base64-encoded images, ChatGPT accepts 20 MB per image, and Gemini Apps accepts
+files up to 100 MB. Use `--max-bytes` or `CLIPFIT_MAX_BYTES` when another limit
+is preferable.
 
 ## Large and ultrawide screenshots
 
