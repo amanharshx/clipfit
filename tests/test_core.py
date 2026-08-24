@@ -270,19 +270,23 @@ def test_original_bytes_reports_png_size_when_processing_tiff():
         assert img.format == "PNG"
 
 
-def test_exif_transpose_result_is_not_copied_again(monkeypatch):
-    # ImageOps.exif_transpose already returns a copy (or a transposed image).
-    # A second copy doubles peak RAM (~58 MiB extra at 6K RGB).
-    n = {"copies": 0}
-    orig = Image.Image.copy
+def test_does_not_copy_exif_transpose_result(monkeypatch):
+    # ImageOps.exif_transpose already returns a new image. Copying that
+    # result again adds about 58 MB peak RAM at 6K RGB.
+    transposed = Image.new("RGB", (800, 600), (1, 2, 3))
+    copies = {"n": 0}
+    orig_copy = transposed.copy
 
-    def spy(self):
-        n["copies"] += 1
-        return orig(self)
+    def spy():
+        copies["n"] += 1
+        return orig_copy()
 
-    monkeypatch.setattr(Image.Image, "copy", spy)
+    transposed.copy = spy
+    monkeypatch.setattr(
+        "clipfit.core.ImageOps.exif_transpose", lambda img, **_k: transposed
+    )
     shrink_image_bytes(_png(800, 600))
-    assert n["copies"] == 1
+    assert copies["n"] == 0
 
 
 def test_force_png_applies_exif_orientation():
