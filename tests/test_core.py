@@ -135,3 +135,13 @@ def test_impossible_budget_raises():
     data = _noisy_png(1600, 1200)
     with pytest.raises(ByteBudgetError):
         shrink_image_bytes(data, max_dim=1568, max_bytes=10)
+
+
+def test_max_dim_below_floor_does_not_blame_budget():
+    # Going below 640px because the user asked for --max-dim 500 (with plenty of
+    # byte budget) must not claim the byte budget forced it.
+    data = _png(1600, 1200)
+    _out, res = shrink_image_bytes(data, max_dim=500, max_bytes=DEFAULT_MAX_BYTES)
+    assert max(res.new_size) == 500
+    assert "byte budget" not in res.note
+    assert "hard to read" in res.note

@@ -94,10 +94,7 @@ def _encode_png_quantized(img: Image.Image, colors: int = 256) -> bytes:
 
 def _floor_note(longest_edge: int) -> str:
     if longest_edge < QUALITY_FLOOR:
-        return (
-            f"shrunk below {QUALITY_FLOOR}px to meet the byte budget; "
-            "text may be hard to read"
-        )
+        return f"output is below {QUALITY_FLOOR}px; text may be hard to read"
     return ""
 
 
