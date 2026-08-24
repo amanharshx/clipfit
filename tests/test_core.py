@@ -145,3 +145,45 @@ def test_max_dim_below_floor_does_not_blame_budget():
     assert max(res.new_size) == 500
     assert "byte budget" not in res.note
     assert "hard to read" in res.note
+
+
+def _jpeg(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (30, 90, 160)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def test_force_png_reencodes_small_image():
+    # Without force_png this is a no-op; with it, always re-encode to PNG.
+    data = _png(800, 600)
+    out, res = shrink_image_bytes(data, force_png=True)
+    assert res.changed
+    assert res.new_size == (800, 600)
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "PNG"
+
+
+def test_force_png_converts_jpeg_to_png():
+    data = _jpeg(800, 600)
+    out, res = shrink_image_bytes(data, force_png=True)
+    assert res.changed
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "PNG"
+        assert img.size == (800, 600)
+
+
+def test_force_png_applies_exif_orientation():
+    # A 40x20 JPEG tagged Orientation=6 displays as 20x40. The output PNG must
+    # bake in that rotation (PNG has no orientation tag), not stay sideways.
+    img = Image.new("RGB", (40, 20), (200, 10, 10))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Orientation
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    data = buf.getvalue()
+
+    out, res = shrink_image_bytes(data, force_png=True)
+    assert res.new_size == (20, 40)
+    with Image.open(io.BytesIO(out)) as result:
+        assert result.size == (20, 40)
+        assert result.getexif().get(0x0112, 1) == 1  # no leftover orientation

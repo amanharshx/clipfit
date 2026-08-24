@@ -133,11 +133,11 @@ def _shrink_file(path: Path, max_dim: int, max_bytes: int, quiet: bool, notify: 
         return 1
 
     data = path.read_bytes()
-    new_data, result = shrink_image_bytes(data, max_dim=max_dim, max_bytes=max_bytes)
-    if not result.changed:
-        _report(result.summary(), quiet, notify)
-        return 0
-
+    # File mode always writes a PNG next to the source, even if no resize is
+    # needed, so the advertised <name>_fit.png is always produced.
+    new_data, result = shrink_image_bytes(
+        data, max_dim=max_dim, max_bytes=max_bytes, force_png=True
+    )
     out_path = path.with_name(f"{path.stem}_fit.png")
     out_path.write_bytes(new_data)
     _report(f"{result.summary()} -> {out_path}", quiet, notify)
