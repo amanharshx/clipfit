@@ -1,27 +1,29 @@
-"""Benchmark clipfit across realistic Mac screenshot resolutions.
+"""Benchmark clipfit without touching the general clipboard.
 
-Measures, per stage, in milliseconds:
-  decode  - PNG bytes -> PIL image
-  resize  - LANCZOS downscale to the cap
-  encode  - shrunk image -> PNG bytes
-  total   - full shrink_image_bytes() call
-  cbwrite - writing the shrunk PNG back to the clipboard (optional)
+Measures p50/p95 ms for:
+  decode, resize, encode, full shrink, unique-pasteboard read/write
+  and a cold subprocess (Python + imports + shrink).
 
-Uses synthetic but non-trivial content (gradient + shapes + noise) so PNG
-encode/decode times reflect real screenshots, not trivially compressible fills.
+Uses a small synthetic corpus (terminal, IDE, browser, photo, transparency)
+plus a noisy worst-case image. TIFF inputs are measured separately from PNG.
 """
 
 from __future__ import annotations
 
 import io
+import os
+import platform
 import statistics
+import subprocess
+import sys
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 
 from clipfit.core import DEFAULT_MAX_DIM, shrink_image_bytes
 
-# Common Mac capture resolutions (retina backing-store pixels).
 RESOLUTIONS = [
     ("MBP 13\" retina", 2560, 1600),
     ("MBP 14\" retina", 3024, 1964),
@@ -31,15 +33,85 @@ RESOLUTIONS = [
     ("6K Pro Display XDR", 6016, 3384),
 ]
 
+CORPUS_KINDS = (
+    "terminal",
+    "ide",
+    "browser",
+    "photo",
+    "transparency",
+    "noisy",
+)
+
 ITERS = 15
 WARMUP = 3
+COLD_ITERS = 8
 
 
-def make_realistic_png(w: int, h: int) -> bytes:
-    """Gradient background + UI-like rectangles + noise overlay -> PNG bytes."""
+def p50_p95(samples: list[float]) -> tuple[float, float]:
+    s = sorted(samples)
+    if not s:
+        return 0.0, 0.0
+
+    def at(p: float) -> float:
+        i = min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1))))
+        return s[i]
+
+    return at(50), at(95)
+
+
+def machine_info() -> dict[str, str]:
+    info = {
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "pillow": getattr(Image, "__version__", "unknown"),
+    }
+    try:
+        import zlib
+
+        info["zlib"] = zlib.ZLIB_VERSION
+    except Exception:
+        info["zlib"] = "unknown"
+    try:
+        import zlib_ng
+
+        info["zlib-ng"] = getattr(zlib_ng, "__version__", "present")
+    except Exception:
+        info["zlib-ng"] = "not imported"
+    return info
+
+
+def make_corpus_png(kind: str, w: int, h: int) -> bytes:
+    if kind == "terminal":
+        img = Image.new("RGB", (w, h), (20, 20, 24))
+        draw = ImageDraw.Draw(img)
+        for i in range(max(8, h // 18)):
+            draw.text((8, 4 + i * 16), f"$ echo line {i}  " + ("x" * 40), fill=(180, 255, 180))
+    elif kind == "ide":
+        img = Image.new("RGB", (w, h), (30, 32, 40))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, 160, h], fill=(40, 42, 54))
+        for i in range(max(8, h // 18)):
+            draw.text((172, 8 + i * 16), f"def fn_{i}(): return {i}", fill=(200, 200, 240))
+    elif kind == "browser":
+        img = _browser_ui(w, h)
+    elif kind == "photo":
+        img = Image.effect_noise((w, h), 80).convert("RGB")
+    elif kind == "transparency":
+        img = Image.new("RGBA", (w, h), (40, 80, 160, 180))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([w // 8, h // 8, w * 7 // 8, h * 7 // 8], fill=(255, 255, 255, 80))
+    elif kind == "noisy":
+        img = Image.effect_noise((w, h), 120).convert("RGB")
+    else:
+        raise ValueError(f"unknown corpus kind {kind!r}")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _browser_ui(w: int, h: int) -> Image.Image:
     base = Image.new("RGB", (w, h))
     px = base.load()
-    # Cheap diagonal gradient.
     for y in range(0, h, 4):
         for x in range(0, w, 4):
             c = ((x * 255) // w, (y * 255) // h, ((x + y) * 255) // (w + h))
@@ -47,23 +119,42 @@ def make_realistic_png(w: int, h: int) -> bytes:
                 for dx in range(4):
                     if x + dx < w and y + dy < h:
                         px[x + dx, y + dy] = c
-
     draw = ImageDraw.Draw(base)
     for i in range(40):
         x0 = (i * 97) % w
         y0 = (i * 53) % h
         draw.rectangle([x0, y0, x0 + 180, y0 + 60], outline=(255, 255, 255), width=2)
-        draw.text((x0 + 6, y0 + 6), f"label {i} :: value_{i*7}", fill=(240, 240, 240))
-
+        draw.text((x0 + 6, y0 + 6), f"label {i} :: value_{i * 7}", fill=(240, 240, 240))
     noise = Image.effect_noise((w, h), 24).convert("RGB")
-    base = ImageChops.add(base, noise, scale=2.0)
+    return ImageChops.add(base, noise, scale=2.0)
 
+
+def make_realistic_png(w: int, h: int) -> bytes:
+    """Kept for encode_bench. Browser-like synthetic screenshot."""
+    return make_corpus_png("browser", w, h)
+
+
+def png_to_tiff(png: bytes) -> bytes:
     buf = io.BytesIO()
-    base.save(buf, format="PNG")
+    with Image.open(io.BytesIO(png)) as img:
+        img.load()
+        img.save(buf, format="TIFF")
     return buf.getvalue()
 
 
-def timed(fn, iters=ITERS, warmup=WARMUP):
+@contextmanager
+def unique_pasteboard():
+    from clipfit import clipboard
+
+    clipboard._ensure_appkit()
+    pb = clipboard.NSPasteboard.pasteboardWithUniqueName()
+    try:
+        yield pb
+    finally:
+        pb.releaseGlobally()
+
+
+def timed_samples(fn, iters: int = ITERS, warmup: int = WARMUP) -> list[float]:
     for _ in range(warmup):
         fn()
     samples = []
@@ -71,75 +162,175 @@ def timed(fn, iters=ITERS, warmup=WARMUP):
         t0 = time.perf_counter()
         fn()
         samples.append((time.perf_counter() - t0) * 1000.0)
-    return statistics.median(samples), min(samples), max(samples)
+    return samples
 
 
-def stage_times(data: bytes, max_dim: int):
+def human(n: float) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB"):
+        if size < 1024 or unit == "MB":
+            return f"{size:.0f}B" if unit == "B" else f"{size:.2f}{unit}"
+        size /= 1024
+    return f"{size:.2f}MB"
+
+
+def _fmt_ms(samples: list[float]) -> str:
+    p50, p95 = p50_p95(samples)
+    return f"{p50:.1f} / {p95:.1f}"
+
+
+def stage_samples(data: bytes, max_dim: int) -> dict[str, list[float]]:
     def decode():
         with Image.open(io.BytesIO(data)) as im:
             im.load()
-        return im
 
-    def resize_encode():
+    def resize():
         with Image.open(io.BytesIO(data)) as im:
             im.load()
             ow, oh = im.size
             scale = max_dim / max(ow, oh)
-            r = im.resize((round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS)
-        b = io.BytesIO()
-        r.save(b, format="PNG", optimize=True)
-        return b.getvalue()
+            if scale < 1:
+                im.resize((round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS)
 
-    dec = timed(decode)
-    tot = timed(lambda: shrink_image_bytes(data, max_dim=max_dim))
-    return dec, tot
+    def encode():
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
+            ow, oh = im.size
+            scale = min(1.0, max_dim / max(ow, oh))
+            r = im if scale == 1 else im.resize(
+                (round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS
+            )
+            buf = io.BytesIO()
+            r.save(buf, format="PNG", compress_level=3)
+
+    return {
+        "decode": timed_samples(decode),
+        "resize": timed_samples(resize),
+        "encode": timed_samples(encode),
+        "total": timed_samples(lambda: shrink_image_bytes(data, max_dim=max_dim)),
+    }
 
 
-def human(n: float) -> str:
-    for u in ("B", "KB", "MB"):
-        if n < 1024 or u == "MB":
-            return f"{n:.1f}{u}"
-        n /= 1024
-    return f"{n:.1f}MB"
+def clipboard_samples(png: bytes) -> dict[str, list[float]] | None:
+    try:
+        from clipfit import clipboard
+        if not clipboard._APPKIT_OK:
+            return None
+    except Exception:
+        return None
+
+    reads: list[float] = []
+    writes: list[float] = []
+    full: list[float] = []
+    with unique_pasteboard() as pb:
+        clipboard.write_png(png, pasteboard=pb)
+
+        def read():
+            clipboard.read_image(pasteboard=pb)
+
+        def write():
+            clipboard.write_png(png, pasteboard=pb)
+
+        def roundtrip():
+            clipboard.write_png(png, pasteboard=pb)
+            clipboard.read_image(pasteboard=pb)
+
+        reads = timed_samples(read)
+        writes = timed_samples(write)
+        full = timed_samples(roundtrip)
+    return {"read": reads, "write": writes, "roundtrip": full}
+
+
+def cold_subprocess_samples(
+    data: bytes,
+    iters: int = COLD_ITERS,
+) -> list[float]:
+    import tempfile
+
+    worker = Path(__file__).with_name("cold_worker.py")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1]) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    samples = []
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=True) as fh:
+        fh.write(data)
+        fh.flush()
+        for _ in range(iters):
+            t0 = time.perf_counter()
+            proc = subprocess.run(
+                [sys.executable, str(worker), "--input", fh.name],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            samples.append((time.perf_counter() - t0) * 1000.0)
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr)
+    return samples
 
 
 def main() -> None:
-    print(f"clipfit benchmark  (cap={DEFAULT_MAX_DIM}px, {ITERS} iters, median ms)\n")
-    header = f"{'resolution':<22}{'MP':>6}{'decode':>10}{'total':>10}{'in size':>11}{'out size':>11}{'reduction':>11}"
+    info = machine_info()
+    print("clipfit benchmark")
+    for k, v in info.items():
+        print(f"  {k}: {v}")
+    print(f"  cap: {DEFAULT_MAX_DIM}px  warm iters: {ITERS}  cold iters: {COLD_ITERS}")
+    print("  clipboard: unique pasteboard (never general)")
+    print()
+
+    header = (
+        f"{'case':<28}{'decode':>16}{'resize':>16}{'encode':>16}"
+        f"{'total':>16}{'in':>10}{'out':>10}"
+    )
+    print("Warm shrink (p50 / p95 ms)")
     print(header)
     print("-" * len(header))
 
-    try:
-        from clipfit import clipboard
-        cb_ok = True
-    except Exception:
-        cb_ok = False
-
+    # Default matrix: browser PNG at each resolution, plus corpus at 4K.
+    cases: list[tuple[str, bytes]] = []
     for name, w, h in RESOLUTIONS:
-        data = make_realistic_png(w, h)
-        (dec_med, _, _), (tot_med, tot_min, tot_max) = stage_times(data, DEFAULT_MAX_DIM)
+        cases.append((f"{name} png", make_corpus_png("browser", w, h)))
+    w4, h4 = 3840, 2160
+    for kind in CORPUS_KINDS:
+        cases.append((f"4K {kind} png", make_corpus_png(kind, w4, h4)))
+    cases.append(("4K browser tiff", png_to_tiff(make_corpus_png("browser", w4, h4))))
+    cases.append(("6K noisy png", make_corpus_png("noisy", 6016, 3384)))
+
+    for label, data in cases:
+        stages = stage_samples(data, DEFAULT_MAX_DIM)
         out, res = shrink_image_bytes(data, max_dim=DEFAULT_MAX_DIM)
-        mp = (w * h) / 1e6
-        reduction = 100 * (1 - res.new_bytes / res.original_bytes)
         print(
-            f"{name:<22}{mp:>5.1f}{dec_med:>10.1f}{tot_med:>10.1f}"
-            f"{human(res.original_bytes):>11}{human(res.new_bytes):>11}{reduction:>10.0f}%"
+            f"{label:<28}"
+            f"{_fmt_ms(stages['decode']):>16}"
+            f"{_fmt_ms(stages['resize']):>16}"
+            f"{_fmt_ms(stages['encode']):>16}"
+            f"{_fmt_ms(stages['total']):>16}"
+            f"{human(res.original_bytes):>10}"
+            f"{human(len(out)):>10}"
         )
 
-    print("\nnote: 'total' = decode + resize + PNG re-encode (the full clipfit op).")
-
-    if cb_ok:
-        # End-to-end clipboard round trip on the largest resolution.
-        data = make_realistic_png(6016, 3384)
-        out, _ = shrink_image_bytes(data, max_dim=DEFAULT_MAX_DIM)
-
-        def write():
-            clipboard.write_png(out)
-
-        med, lo, hi = timed(write, iters=10, warmup=2)
-        print(f"\nclipboard write (6K shrunk PNG): median {med:.1f} ms  (min {lo:.1f}, max {hi:.1f})")
+    cb = clipboard_samples(make_corpus_png("browser", 1280, 800))
+    print()
+    if cb is None:
+        print("Unique pasteboard: skipped (AppKit unavailable)")
     else:
-        print("\nclipboard write: skipped (AppKit unavailable)")
+        print("Unique pasteboard (1280x800 PNG, p50 / p95 ms)")
+        print(f"  read       {_fmt_ms(cb['read'])}")
+        print(f"  write      {_fmt_ms(cb['write'])}")
+        print(f"  roundtrip  {_fmt_ms(cb['roundtrip'])}")
+
+    print()
+    print("Cold subprocess (Python launch + imports + shrink, p50 / p95 ms)")
+    for label, payload in (
+        ("13-inch png", make_corpus_png("browser", 2560, 1600)),
+        ("4K png", make_corpus_png("browser", 3840, 2160)),
+        ("6K png", make_corpus_png("browser", 6016, 3384)),
+        ("4K tiff", png_to_tiff(make_corpus_png("browser", 3840, 2160))),
+    ):
+        samples = cold_subprocess_samples(payload)
+        print(f"  {label:<16}{_fmt_ms(samples)}")
 
 
 if __name__ == "__main__":
