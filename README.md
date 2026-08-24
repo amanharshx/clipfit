@@ -41,7 +41,7 @@ image already fits, clipfit does nothing.
 | Before | After clipfit |
 | --- | --- |
 | 3420 × 2214, ~1 MB screenshot | 1568 × 1015, fits limits above |
-| 6016 × 3384 (6K) synthetic screenshot | 1568px longest edge, 1.59 MB |
+| 6016 × 3384 (6K) synthetic screenshot | 1568 × 882, 1.59 MB |
 
 You run it per image. Copy the way you always do, then press a hotkey only when
 the image is going to an LLM. Nothing runs on every copy.
@@ -185,11 +185,9 @@ clipboard read/write, and image processing.
 | 3840 × 2160 (4K) | 224 ms | 227 ms | 1.79 MB |
 | 6016 × 3384 (6K) | 268 ms | 333 ms | 1.59 MB |
 
-A synthetic 6K screenshot completed the full cold path in 268 ms p50
-on the benchmark machine.
-
 The resident worker avoids repeatedly loading Pillow and AppKit. The
-stdlib-only client and Unix-socket round trip take about 38 ms p50.
+Starting `clipfit-client` and completing its Unix-socket round trip takes
+about 38 ms p50.
 Measured components put typical resident-worker latency around 120–150 ms,
 depending on image size and content. That 120–150 ms range is derived from
 those components, not a single production end-to-end measurement.
