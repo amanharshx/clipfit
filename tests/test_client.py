@@ -2,6 +2,8 @@ import os
 import socket
 import threading
 
+import pytest
+
 from clipfit import client, worker
 
 
@@ -40,6 +42,37 @@ def test_client_parses_mb_env(monkeypatch):
     monkeypatch.setattr(client, "request_shrink", fake)
     assert client.main([]) == 0
     assert seen["max_bytes"] == int(3.5 * 1024 * 1024)
+
+
+def test_client_invalid_env_is_argparse_error(monkeypatch, capsys):
+    monkeypatch.setenv("CLIPFIT_MAX_DIM", "abc")
+    with pytest.raises(SystemExit) as exc:
+        client.main([])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid" in err.lower() or "error" in err.lower()
+
+
+def test_client_invalid_bytes_env_is_argparse_error(monkeypatch, capsys):
+    monkeypatch.setenv("CLIPFIT_MAX_BYTES", "abc")
+    with pytest.raises(SystemExit) as exc:
+        client.main([])
+    assert exc.value.code == 2
+    assert "invalid byte size" in capsys.readouterr().err
+
+
+def test_read_message_uses_passed_timeout(monkeypatch):
+    seen = {}
+
+    class Fake:
+        def settimeout(self, t):
+            seen["t"] = t
+
+        def recv(self, _n):
+            raise socket.timeout()
+
+    assert client._read_message(Fake(), timeout=30.0) is None
+    assert seen["t"] == 30.0
 
 
 def test_malformed_response_falls_back(monkeypatch):

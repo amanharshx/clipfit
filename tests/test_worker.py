@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 import socket
@@ -114,29 +115,52 @@ def test_claim_removes_stale_socket():
     stale.bind(str(path))
     stale.close()
     assert path.exists()
-    sock, inode = worker._claim_socket(path)
+    sock, inode, lock = worker._claim_socket(path)
     try:
         assert path.exists()
         assert stat.S_ISSOCK(path.stat().st_mode)
         assert path.stat().st_ino == inode
     finally:
         sock.close()
+        lock.close()
         path.unlink(missing_ok=True)
+        worker.lock_path(path).unlink(missing_ok=True)
 
 
 def test_old_worker_does_not_unlink_replacement():
     path = Path(_sock("clipfit-test-owned.sock"))
     if path.exists():
         path.unlink()
-    first, inode1 = worker._claim_socket(path)
+    first, inode1, lock1 = worker._claim_socket(path)
     first.close()
+    lock1.close()
     path.unlink()
-    second, inode2 = worker._claim_socket(path)
+    second, inode2, lock2 = worker._claim_socket(path)
     assert inode1 != inode2
     worker._unlink_owned(path, inode1)
     assert path.exists()
     second.close()
+    lock2.close()
     path.unlink()
+    worker.lock_path(path).unlink(missing_ok=True)
+
+
+def test_claim_uses_lock_not_connect_probe():
+    path = Path(_sock("clipfit-test-flock.sock"))
+    lock = worker.lock_path(path)
+    if path.exists():
+        path.unlink()
+    if lock.exists():
+        lock.unlink()
+    holder = open(lock, "a+")
+    fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        with pytest.raises(worker.WorkerAlreadyRunning):
+            worker._claim_socket(path)
+    finally:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+        holder.close()
+        lock.unlink(missing_ok=True)
 
 
 def test_serve_one_request(monkeypatch):

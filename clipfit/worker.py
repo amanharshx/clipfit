@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import socket
 import stat
 from pathlib import Path
-from typing import Callable
+from typing import Callable, IO
 
 from .protocol import MAX_MESSAGE_BYTES, SOCKET_TIMEOUT, encode_request, socket_path
 
@@ -85,35 +86,39 @@ def preload() -> None:
     clipboard._ensure_appkit()
 
 
-def _claim_socket(path: Path) -> tuple[socket.socket, int]:
+def lock_path(sock: Path) -> Path:
+    return Path(str(sock) + ".lock")
+
+
+def _claim_socket(path: Path) -> tuple[socket.socket, int, IO[str]]:
     path.parent.mkdir(parents=True, exist_ok=True)
     cache_dir = Path.home() / "Library" / "Caches" / "clipfit"
     if path.parent == cache_dir:
         os.chmod(path.parent, 0o700)
+    lock_file = open(lock_path(path), "a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        raise WorkerAlreadyRunning("clipfit worker: already running") from None
+    os.chmod(lock_path(path), 0o600)
     if path.exists():
         mode = path.lstat().st_mode
         if not stat.S_ISSOCK(mode):
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
             raise WorkerError(f"{path} exists and is not a socket")
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        probe.settimeout(0.2)
-        try:
-            probe.connect(str(path))
-        except OSError:
-            path.unlink()
-        else:
-            raise WorkerAlreadyRunning("clipfit worker: already running")
-        finally:
-            probe.close()
+        path.unlink()
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.bind(str(path))
     os.chmod(path, 0o600)
     inode = path.stat().st_ino
     sock.listen(8)
-    return sock, inode
+    return sock, inode, lock_file
 
 
-def _read_message(conn: socket.socket) -> bytes | None:
-    conn.settimeout(SOCKET_TIMEOUT)
+def _read_message(conn: socket.socket, timeout: float = SOCKET_TIMEOUT) -> bytes | None:
+    conn.settimeout(timeout)
     raw = b""
     while b"\n" not in raw:
         remaining = MAX_MESSAGE_BYTES - len(raw)
@@ -157,7 +162,7 @@ def serve(
     if preload_deps:
         preload()
     path = socket_path()
-    sock, inode = _claim_socket(path)
+    sock, inode, lock_file = _claim_socket(path)
     print(f"clipfit worker: listening at {path}", flush=True)
     if ready is not None:
         ready.set()
@@ -190,3 +195,8 @@ def serve(
     finally:
         sock.close()
         _unlink_owned(path, inode)
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_file.close()

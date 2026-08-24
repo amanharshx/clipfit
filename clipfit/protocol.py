@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 
 MAX_MESSAGE_BYTES = 8192
-SOCKET_TIMEOUT = 2.0
+SOCKET_TIMEOUT = 2.0  # worker request-read timeout
+CLIENT_RESPONSE_TIMEOUT = 30.0
 
 
 def socket_path() -> Path:
