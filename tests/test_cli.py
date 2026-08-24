@@ -168,3 +168,23 @@ def test_hotkey_remove_succeeds_when_skhd_missing(isolated_hotkey, monkeypatch, 
     assert "Removed the clipfit hotkey" in out
     assert "skhd not found" not in out
     assert isolated_hotkey.current_binding() is None
+
+
+def test_hotkey_remove_does_not_start_stopped_skhd(isolated_hotkey, monkeypatch, capsys):
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "restart_service", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "open_accessibility_pane", lambda: None)
+    assert cli.main(["hotkey", "set", "--hotkey", "cmd+shift+v"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(isolated_hotkey, "service_running", lambda: False)
+
+    def no_start():
+        raise AssertionError("stopped skhd must not be started on remove")
+
+    monkeypatch.setattr(isolated_hotkey, "restart_service", no_start)
+    rc = cli.main(["hotkey", "remove"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Removed the clipfit hotkey" in out
+    assert "skhd reloaded" not in out
+    assert isolated_hotkey.current_binding() is None

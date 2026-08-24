@@ -215,13 +215,6 @@ def _run_shrink(argv: list[str]) -> int:
 
 # --- hotkey commands ----------------------------------------------------------
 
-def _ensure_skhd(hk) -> bool:
-    if hk.skhd_available():
-        return True
-    print(f"clipfit: {hk.missing_skhd_message()}")
-    return False
-
-
 def _hotkey_after_set(hk) -> None:
     """Restart skhd. Accessibility help only if skhd exists but is not running."""
     if hk.restart_service():
@@ -259,7 +252,8 @@ def _hotkey_set(argv: list[str]) -> int:
         print(HOTKEY_HELP)
         return 0
 
-    if not _ensure_skhd(hk):
+    if not hk.skhd_available():
+        print(f"clipfit: {hk.missing_skhd_message()}")
         return 2
 
     existing = hk.current_binding()
@@ -352,12 +346,13 @@ def _hotkey_remove(argv: list[str]) -> int:
         print("Nothing to remove \u2014 no clipfit hotkey is set.")
         return 0
     pretty = existing[1] if existing else "unknown"
-    if hk.skhd_available():
+    # Reload only if skhd is already running. A stopped install must stay
+    # stopped: restart_service() would pick --start-service.
+    reloaded = False
+    if hk.skhd_available() and hk.service_running():
         reloaded = hk.restart_service()
-        if reloaded:
-            print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
-        else:
-            print(f"Removed the clipfit hotkey (was {pretty}).")
+    if reloaded:
+        print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
     else:
         print(f"Removed the clipfit hotkey (was {pretty}).")
     return 0
