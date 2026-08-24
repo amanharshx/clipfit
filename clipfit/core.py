@@ -155,23 +155,30 @@ def shrink_image_bytes(
         )
         resized = _normalize_for_png(resized)
 
-        # Try full-color PNG first (best quality), then progressively smaller
-        # palettes once we are at or below the readable floor.
-        candidates: list[tuple[bytes, str]] = [
-            (_encode_png(resized), "resized" if target_edge < longest else "reencoded"),
-        ]
-        palettes = [256] + ([128, 64] if target_edge <= QUALITY_FLOOR else [])
-        for colors in palettes:
-            candidates.append((_encode_png_quantized(resized, colors), f"quantized {colors}c"))
+        # Full-color PNG first. Quantize only if that encoding is over budget.
+        full = _encode_png(resized)
+        if len(full) <= max_bytes:
+            out_bytes = full
+            strategy = "resized" if target_edge < longest else "reencoded"
+            note = _floor_note(target_edge)
+            break
 
-        fit = next((c for c in candidates if len(c[0]) <= max_bytes), None)
+        palettes = [256] + ([128, 64] if target_edge <= QUALITY_FLOOR else [])
+        smallest = len(full)
+        fit: tuple[bytes, str] | None = None
+        for colors in palettes:
+            quantized = _encode_png_quantized(resized, colors)
+            smallest = min(smallest, len(quantized))
+            if len(quantized) <= max_bytes:
+                fit = (quantized, f"quantized {colors}c")
+                break
+
         if fit is not None:
             out_bytes, strategy = fit
             note = _floor_note(target_edge)
             break
 
         if target_edge <= 1:
-            smallest = min(len(c[0]) for c in candidates)
             raise ByteBudgetError(
                 f"cannot produce a PNG under {_human(max_bytes)} "
                 f"(smallest clipfit can make is {_human(smallest)})"

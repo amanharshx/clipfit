@@ -89,6 +89,19 @@ def test_oversized_dims_but_recompresses_under_budget():
     assert len(out) <= DEFAULT_MAX_BYTES
 
 
+def test_skips_quantizer_when_full_color_png_fits(monkeypatch):
+    # Flat images fit as full-color PNG. Quantizing them is wasted latency.
+    def boom(*_args, **_kwargs):
+        raise AssertionError("quantizer should not run when full-color PNG fits")
+
+    monkeypatch.setattr("clipfit.core._encode_png_quantized", boom)
+    data = _png(4000, 3000)
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=DEFAULT_MAX_BYTES)
+    assert res.changed
+    assert "quantized" not in res.strategy
+    assert len(out) <= DEFAULT_MAX_BYTES
+
+
 
 def test_output_always_fits_byte_budget():
     # A noisy image with a tight budget must still come out under the budget.
