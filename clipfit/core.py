@@ -80,9 +80,9 @@ def _normalize_for_png(img: Image.Image) -> Image.Image:
     return img
 
 
-def _encode_png(img: Image.Image) -> bytes:
+def _encode_png(img: Image.Image, compress_level: int = 3) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format="PNG", compress_level=3)
+    img.save(buf, format="PNG", compress_level=compress_level)
     return buf.getvalue()
 
 
@@ -159,8 +159,14 @@ def shrink_image_bytes(
         )
         resized = _normalize_for_png(resized)
 
-        # Full-color PNG first. Quantize only if that encoding is over budget.
+        # Full-color PNG first (level 3). If that misses the budget, retry
+        # level 6 before quantizing so a few extra compressed bytes cannot
+        # drop a full-color image to a 256-color palette.
         full = _encode_png(resized)
+        if len(full) > max_bytes:
+            tighter = _encode_png(resized, compress_level=6)
+            if len(tighter) < len(full):
+                full = tighter
         if len(full) <= max_bytes:
             out_bytes = full
             strategy = "resized" if target_edge < longest else "reencoded"

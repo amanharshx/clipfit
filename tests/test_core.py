@@ -7,7 +7,6 @@ from clipfit.core import (
     DEFAULT_MAX_BYTES,
     QUALITY_FLOOR,
     ByteBudgetError,
-    _encode_png,
     _encode_png_quantized,
     _normalize_for_png,
     shrink_image_bytes,
@@ -28,19 +27,32 @@ def _noisy_png(w: int, h: int) -> bytes:
     return buf.getvalue()
 
 
-def test_encode_png_uses_compress_level_3(monkeypatch):
-    captured = {}
-    orig = Image.Image.save
+def test_retries_level_6_before_quantizing_when_level_3_misses_budget(monkeypatch):
+    # Level 3 can land a few KB over the budget when level 6 still fits.
+    # Quantizing in that gap would drop full-color RGB to a 256-color palette.
+    levels = []
 
-    def spy(self, fp, format=None, **kwargs):
-        captured["format"] = format
-        captured.update(kwargs)
-        return orig(self, fp, format=format, **kwargs)
+    def encode(img, compress_level=3):
+        levels.append(compress_level)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", compress_level=6)
+        png = buf.getvalue()
+        if compress_level == 3:
+            return png + bytes(max(0, DEFAULT_MAX_BYTES + 1 - len(png)))
+        return png
 
-    monkeypatch.setattr(Image.Image, "save", spy)
-    _encode_png(Image.new("RGB", (8, 8), (1, 2, 3)))
-    assert captured.get("format") == "PNG"
-    assert captured.get("compress_level") == 3
+    monkeypatch.setattr("clipfit.core._encode_png", encode)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("quantizer should not run when level 6 fits")
+
+    monkeypatch.setattr("clipfit.core._encode_png_quantized", boom)
+
+    out, res = shrink_image_bytes(_png(4000, 3000), max_dim=1568)
+    assert levels == [3, 6]
+    assert "quantized" not in res.strategy
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.mode != "P"
 
 
 def test_downscales_oversized_landscape():
