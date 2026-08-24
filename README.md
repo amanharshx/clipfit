@@ -57,7 +57,8 @@ With pipx:
 pipx install git+https://github.com/amanharshx/clipfit
 ```
 
-pipx installs clipfit only. Install skhd separately (`brew install skhd`) if you
+pipx installs clipfit only. Install skhd separately
+(`brew install asmvik/formulae/skhd`) if you
 want `clipfit hotkey set`, or bind clipfit through another launcher.
 
 Needs macOS (it uses `NSPasteboard` through pyobjc) and Python 3.9 or newer.

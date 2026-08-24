@@ -352,16 +352,14 @@ def _hotkey_remove(argv: list[str]) -> int:
         print("Nothing to remove \u2014 no clipfit hotkey is set.")
         return 0
     pretty = existing[1] if existing else "unknown"
-    if not hk.skhd_available():
-        print(f"Removed the clipfit hotkey (was {pretty}).")
-        print(f"clipfit: {hk.missing_skhd_message()}")
-        return 2
-    reloaded = hk.restart_service()
-    if reloaded:
-        print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
+    if hk.skhd_available():
+        reloaded = hk.restart_service()
+        if reloaded:
+            print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
+        else:
+            print(f"Removed the clipfit hotkey (was {pretty}).")
     else:
         print(f"Removed the clipfit hotkey (was {pretty}).")
-        print("clipfit: skhd did not stay running. Check Accessibility, then run: clipfit hotkey show")
     return 0
 
 

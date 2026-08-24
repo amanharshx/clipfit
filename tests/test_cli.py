@@ -148,3 +148,23 @@ def test_hotkey_show_missing_skhd_is_not_accessibility(isolated_hotkey, monkeypa
     out = capsys.readouterr().out
     assert "skhd not found" in out
     assert "Accessibility" not in out
+
+
+def test_hotkey_remove_succeeds_when_skhd_missing(isolated_hotkey, monkeypatch, capsys):
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "restart_service", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "open_accessibility_pane", lambda: None)
+    assert cli.main(["hotkey", "set", "--hotkey", "cmd+shift+v"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: False)
+
+    def no_restart():
+        raise AssertionError("missing skhd does not need a reload")
+
+    monkeypatch.setattr(isolated_hotkey, "restart_service", no_restart)
+    rc = cli.main(["hotkey", "remove"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Removed the clipfit hotkey" in out
+    assert "skhd not found" not in out
+    assert isolated_hotkey.current_binding() is None
