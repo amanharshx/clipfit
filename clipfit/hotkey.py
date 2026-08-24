@@ -224,15 +224,32 @@ def remove_binding() -> bool:
 
 # --- skhd service -------------------------------------------------------------
 
-def _skhd_available() -> bool:
+def skhd_available() -> bool:
     return shutil.which("skhd") is not None
 
 
-def restart_service() -> None:
-    if not _skhd_available():
-        return
-    subprocess.run(["skhd", "--restart-service"], check=False,
-                   capture_output=True, timeout=15)
+def missing_skhd_message() -> str:
+    return (
+        "skhd not found. Install it with `brew install skhd`, "
+        "or bind clipfit through another launcher. "
+        "pipx and source installs do not include skhd."
+    )
+
+
+def restart_service() -> bool:
+    """Restart skhd. True if a skhd process is running afterward."""
+    if not skhd_available():
+        return False
+    try:
+        subprocess.run(
+            ["skhd", "--restart-service"],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return service_running()
 
 
 def service_running() -> bool:

@@ -79,6 +79,9 @@ skhd binding in a marked block in your `~/.config/skhd/skhdrc`, starts skhd, and
 opens the Accessibility pane so you can allow skhd. After that: copy an image,
 press the shortcut, then paste. Only that keypress touches the clipboard.
 
+`clipfit hotkey set` needs skhd on your PATH. If it is missing, clipfit says so
+and exits; it does not treat that as an Accessibility problem.
+
 macOS asks you to grant skhd Accessibility once. No installer can do this for
 you; it is an OS security prompt. Run `clipfit hotkey show` to confirm the
 status afterward.

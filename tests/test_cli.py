@@ -1,9 +1,11 @@
+import importlib
 import io
 
 import pytest
 from PIL import Image
 
 from clipfit import cli
+import clipfit.hotkey as hotkey
 
 
 def _make_png(path, w=400, h=300):
@@ -86,3 +88,63 @@ def test_sound_plays_pop_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_play_sound", lambda ok: calls.append(ok))
     assert cli.main([str(src), "--sound"]) == 0
     assert calls == [True]
+
+
+@pytest.fixture()
+def isolated_hotkey(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    importlib.reload(hotkey)
+    return hotkey
+
+
+def test_hotkey_set_missing_skhd(isolated_hotkey, monkeypatch, capsys):
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: False)
+    rc = cli.main(["hotkey", "set", "--hotkey", "cmd+shift+v"])
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "skhd not found" in out
+    assert "Accessibility" not in out
+    assert isolated_hotkey.current_binding() is None
+
+
+def test_hotkey_set_success_when_skhd_running(isolated_hotkey, monkeypatch, capsys):
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "restart_service", lambda: True)
+    def no_pane():
+        raise AssertionError("Accessibility pane should not open")
+
+    monkeypatch.setattr(isolated_hotkey, "open_accessibility_pane", no_pane)
+    rc = cli.main(["hotkey", "set", "--hotkey", "cmd+shift+v"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Hotkey set" in out
+    assert "You're all set" in out
+    assert "Accessibility permission" not in out
+    assert isolated_hotkey.current_binding() is not None
+
+
+def test_hotkey_set_accessibility_when_skhd_not_running(isolated_hotkey, monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "restart_service", lambda: False)
+    monkeypatch.setattr(isolated_hotkey, "open_accessibility_pane", lambda: opened.append(True))
+    rc = cli.main(["hotkey", "set", "--hotkey", "option+shift+v"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Accessibility permission" in out
+    assert "skhd not found" not in out
+    assert opened == [True]
+
+
+def test_hotkey_show_missing_skhd_is_not_accessibility(isolated_hotkey, monkeypatch, capsys):
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "restart_service", lambda: True)
+    monkeypatch.setattr(isolated_hotkey, "open_accessibility_pane", lambda: None)
+    assert cli.main(["hotkey", "set", "--hotkey", "cmd+shift+v"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(isolated_hotkey, "skhd_available", lambda: False)
+    rc = cli.main(["hotkey", "show"])
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "skhd not found" in out
+    assert "Accessibility" not in out
