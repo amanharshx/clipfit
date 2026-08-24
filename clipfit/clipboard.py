@@ -35,13 +35,17 @@ def _ensure_appkit() -> None:
         )
 
 
-def read_image() -> bytes | None:
+def _pasteboard(pasteboard=None):
+    return pasteboard if pasteboard is not None else NSPasteboard.generalPasteboard()
+
+
+def read_image(pasteboard=None) -> bytes | None:
     """Return image bytes from the clipboard, or None if no image is present.
 
     Prefers PNG; falls back to TIFF (screenshots often land as TIFF).
     """
     _ensure_appkit()
-    pb = NSPasteboard.generalPasteboard()
+    pb = _pasteboard(pasteboard)
 
     for pb_type in (NSPasteboardTypePNG, NSPasteboardTypeTIFF):
         data = pb.dataForType_(pb_type)
@@ -50,14 +54,14 @@ def read_image() -> bytes | None:
     return None
 
 
-def write_png(png_bytes: bytes) -> int:
+def write_png(png_bytes: bytes, pasteboard=None) -> int:
     """Replace clipboard contents with the given PNG bytes.
 
     Returns the pasteboard change count after writing (useful for loop-guarding
     a future watcher so it can ignore its own writes).
     """
     _ensure_appkit()
-    pb = NSPasteboard.generalPasteboard()
+    pb = _pasteboard(pasteboard)
     ns_data = NSData.dataWithBytes_length_(png_bytes, len(png_bytes))
     pb.clearContents()
 
