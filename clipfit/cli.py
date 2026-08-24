@@ -7,7 +7,6 @@ manages the keyboard shortcut (set / show / remove).
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from .core import (
     ClipfitImageError,
     shrink_image_bytes,
 )
+from .protocol import parse_bytes
 
 DEFAULT_HOTKEY = "option+shift+v"
 
@@ -31,6 +31,7 @@ USAGE
   clipfit [options]           shrink the image on the clipboard (default)
   clipfit <file> [options]    shrink an image file -> writes <name>_fit.png
   clipfit hotkey <command>    manage the keyboard shortcut
+  clipfit worker              run the resident worker (keeps imports warm)
 
 HOTKEY COMMANDS
   clipfit hotkey set          choose/change the shortcut (interactive)
@@ -93,23 +94,10 @@ def _play_sound(ok: bool) -> None:
 
 
 def _parse_bytes(v: str) -> int:
-    s = str(v).strip().lower()
-    mult = 1
-    if s.endswith("mb"):
-        mult, s = 1024 * 1024, s[:-2]
-    elif s.endswith("kb"):
-        mult, s = 1024, s[:-2]
-    elif s.endswith("b"):
-        s = s[:-1]
     try:
-        value = float(s) * mult
-        if not math.isfinite(value):
-            raise ValueError("not a finite size")
-        return int(value)
-    except (ValueError, OverflowError):
-        raise argparse.ArgumentTypeError(
-            f"invalid byte size '{v}'; use a value such as 3.5mb"
-        ) from None
+        return parse_bytes(v)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 # --- shrink command -----------------------------------------------------------
@@ -388,6 +376,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "hotkey":
         return _run_hotkey(argv[1:])
+    if argv and argv[0] == "worker":
+        from .worker import WorkerAlreadyRunning, WorkerError, serve
+
+        try:
+            serve()
+        except WorkerAlreadyRunning:
+            print("clipfit worker: already running")
+            return 2
+        except WorkerError as exc:
+            print(f"clipfit worker: {exc}")
+            return 2
+        except KeyboardInterrupt:
+            return 0
+        return 0
     if argv and argv[0] == "--version":
         print(f"clipfit {__version__}")
         return 0

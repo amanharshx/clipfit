@@ -66,6 +66,7 @@ def test_set_creates_block(hk):
     assert pretty == "Option + Shift + V"
     text = hk.config_path().read_text()
     assert hk.BLOCK_START in text and hk.BLOCK_END in text
+    assert "clipfit-client" in text
 
 
 def test_set_replaces_block_not_duplicates(hk):

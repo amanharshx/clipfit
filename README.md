@@ -76,12 +76,22 @@ The simplest way, once installed:
 
 ```bash
 clipfit hotkey set
+clipfit worker
 ```
 
-It asks for a shortcut (Enter accepts the default, Option+Shift+V), writes an
-skhd binding in a marked block in your `~/.config/skhd/skhdrc`, starts skhd, and
-opens the Accessibility pane so you can allow skhd. After that: copy an image,
-press the shortcut, then paste. Only that keypress touches the clipboard.
+First configure the hotkey, then start the worker. `clipfit worker` stays in
+the foreground, so leave that terminal open. It keeps Pillow and AppKit loaded
+so the hotkey does not pay Python startup on every press. There is no launchd
+or auto-start yet. If the worker is not running, `clipfit-client` falls back
+to a normal `clipfit` process.
+
+`clipfit hotkey set` asks for a shortcut (Enter accepts the default,
+Option+Shift+V), writes an skhd binding to `clipfit-client` in a marked block
+in your `~/.config/skhd/skhdrc`, starts skhd, and opens the Accessibility pane
+so you can allow skhd. If you already had a clipfit hotkey, run
+`clipfit hotkey set` again so it points at `clipfit-client`. After that: copy
+an image, press the shortcut, then paste. Only that keypress touches the
+clipboard.
 
 `clipfit hotkey set` needs skhd on your PATH. If it is missing, clipfit says so
 and exits; it does not treat that as an Accessibility problem.
@@ -117,6 +127,7 @@ clipfit --max-bytes 3.5mb  # set a different size budget
 clipfit path/to/img.png    # shrink a file instead; writes img_fit.png
 
 clipfit hotkey set         # pick or change the shortcut (interactive)
+clipfit worker             # keep a warm process for the hotkey (foreground)
 clipfit hotkey show        # show the current shortcut and status
 clipfit hotkey remove      # remove the shortcut
 ```
