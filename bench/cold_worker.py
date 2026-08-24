@@ -1,40 +1,41 @@
-"""Cold-start worker: one process, one shrink, unique pasteboard only."""
+"""Cold-start worker: read unique source pasteboard, shrink, write dest."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-t_start = time.perf_counter()
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to PNG or TIFF bytes")
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--dest", required=True)
     args = parser.parse_args()
 
+    from clipfit import clipboard
     from clipfit.core import shrink_image_bytes
 
-    data = Path(args.input).read_bytes()
-    out, _res = shrink_image_bytes(data)
+    clipboard._ensure_appkit()
+    src = clipboard.NSPasteboard.pasteboardWithName_(args.source)
+    dst = clipboard.NSPasteboard.pasteboardWithName_(args.dest)
+    if src is None or dst is None:
+        print("clipfit bench: pasteboard not found", file=sys.stderr)
+        return 1
 
-    try:
-        from clipfit import clipboard
-        from bench.benchmark import unique_pasteboard
+    got = clipboard.read_image(pasteboard=src)
+    if got is None:
+        print("clipfit bench: no image on source pasteboard", file=sys.stderr)
+        return 1
 
-        if clipboard._APPKIT_OK:
-            with unique_pasteboard() as pb:
-                clipboard.write_png(out, pasteboard=pb)
-    except Exception:
-        pass
-
-    elapsed_ms = (time.perf_counter() - t_start) * 1000.0
-    print(json.dumps({"ms": round(elapsed_ms, 2), "out_bytes": len(out)}))
+    data, original_bytes = got
+    force_png = clipboard.png_header_size(data) is None
+    out, _res = shrink_image_bytes(
+        data, original_bytes=original_bytes, force_png=force_png
+    )
+    clipboard.write_png(out, pasteboard=dst)
     return 0
 
 

@@ -11,6 +11,7 @@ plus a noisy worst-case image. TIFF inputs are measured separately from PNG.
 from __future__ import annotations
 
 import io
+import math
 import os
 import platform
 import statistics
@@ -20,7 +21,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, features
 
 from clipfit.core import DEFAULT_MAX_DIM, shrink_image_bytes
 
@@ -48,36 +49,22 @@ COLD_ITERS = 8
 
 
 def p50_p95(samples: list[float]) -> tuple[float, float]:
-    s = sorted(samples)
-    if not s:
+    if not samples:
         return 0.0, 0.0
-
-    def at(p: float) -> float:
-        i = min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1))))
-        return s[i]
-
-    return at(50), at(95)
+    s = sorted(samples)
+    p50 = float(statistics.median(s))
+    p95 = float(s[math.ceil(0.95 * len(s)) - 1])
+    return p50, p95
 
 
 def machine_info() -> dict[str, str]:
-    info = {
+    return {
         "platform": platform.platform(),
         "python": sys.version.split()[0],
-        "pillow": getattr(Image, "__version__", "unknown"),
+        "pillow": Image.__version__,
+        "zlib": features.version_codec("zlib") or "unknown",
+        "zlib-ng": features.version_feature("zlib_ng") or "none",
     }
-    try:
-        import zlib
-
-        info["zlib"] = zlib.ZLIB_VERSION
-    except Exception:
-        info["zlib"] = "unknown"
-    try:
-        import zlib_ng
-
-        info["zlib-ng"] = getattr(zlib_ng, "__version__", "present")
-    except Exception:
-        info["zlib-ng"] = "not imported"
-    return info
 
 
 def make_corpus_png(kind: str, w: int, h: int) -> bytes:
@@ -95,18 +82,42 @@ def make_corpus_png(kind: str, w: int, h: int) -> bytes:
     elif kind == "browser":
         img = _browser_ui(w, h)
     elif kind == "photo":
-        img = Image.effect_noise((w, h), 80).convert("RGB")
+        img = ImageChops.add(_gradient_rgb(w, h), _rgb_noise(w, h, 80), scale=2.0)
     elif kind == "transparency":
         img = Image.new("RGBA", (w, h), (40, 80, 160, 180))
         draw = ImageDraw.Draw(img)
         draw.rectangle([w // 8, h // 8, w * 7 // 8, h * 7 // 8], fill=(255, 255, 255, 80))
     elif kind == "noisy":
-        img = Image.effect_noise((w, h), 120).convert("RGB")
+        img = _rgb_noise(w, h, 120)
     else:
         raise ValueError(f"unknown corpus kind {kind!r}")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _rgb_noise(w: int, h: int, sigma: float) -> Image.Image:
+    return Image.merge(
+        "RGB",
+        (
+            Image.effect_noise((w, h), sigma),
+            Image.effect_noise((w, h), sigma * 1.17),
+            Image.effect_noise((w, h), sigma * 0.83),
+        ),
+    )
+
+
+def _gradient_rgb(w: int, h: int) -> Image.Image:
+    base = Image.new("RGB", (w, h))
+    px = base.load()
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            c = ((x * 255) // w, (y * 255) // h, ((x + y) * 255) // max(1, w + h))
+            for dy in range(4):
+                for dx in range(4):
+                    if x + dx < w and y + dy < h:
+                        px[x + dx, y + dy] = c
+    return base
 
 
 def _browser_ui(w: int, h: int) -> Image.Image:
@@ -174,39 +185,42 @@ def human(n: float) -> str:
     return f"{size:.2f}MB"
 
 
+def _fmt_one(ms: float) -> str:
+    return f"{ms:.3f}" if ms < 1 else f"{ms:.1f}"
+
+
 def _fmt_ms(samples: list[float]) -> str:
     p50, p95 = p50_p95(samples)
-    return f"{p50:.1f} / {p95:.1f}"
+    return f"{_fmt_one(p50)} / {_fmt_one(p95)}"
+
+
+def decode_loaded(data: bytes) -> Image.Image:
+    im = Image.open(io.BytesIO(data))
+    im.load()
+    return im
+
+
+def resize_loaded(img: Image.Image, max_dim: int) -> Image.Image:
+    ow, oh = img.size
+    scale = max_dim / max(ow, oh)
+    if scale >= 1:
+        return img
+    return img.resize((round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS)
+
+
+def encode_resized(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", compress_level=3)
+    return buf.getvalue()
 
 
 def stage_samples(data: bytes, max_dim: int) -> dict[str, list[float]]:
-    def decode():
-        with Image.open(io.BytesIO(data)) as im:
-            im.load()
-
-    def resize():
-        with Image.open(io.BytesIO(data)) as im:
-            im.load()
-            ow, oh = im.size
-            scale = max_dim / max(ow, oh)
-            if scale < 1:
-                im.resize((round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS)
-
-    def encode():
-        with Image.open(io.BytesIO(data)) as im:
-            im.load()
-            ow, oh = im.size
-            scale = min(1.0, max_dim / max(ow, oh))
-            r = im if scale == 1 else im.resize(
-                (round(ow * scale), round(oh * scale)), Image.Resampling.LANCZOS
-            )
-            buf = io.BytesIO()
-            r.save(buf, format="PNG", compress_level=3)
-
+    loaded = decode_loaded(data)
+    resized = resize_loaded(loaded, max_dim)
     return {
-        "decode": timed_samples(decode),
-        "resize": timed_samples(resize),
-        "encode": timed_samples(encode),
+        "decode": timed_samples(lambda: decode_loaded(data)),
+        "resize": timed_samples(lambda: resize_loaded(loaded, max_dim)),
+        "encode": timed_samples(lambda: encode_resized(resized)),
         "total": timed_samples(lambda: shrink_image_bytes(data, max_dim=max_dim)),
     }
 
@@ -241,11 +255,28 @@ def clipboard_samples(png: bytes) -> dict[str, list[float]] | None:
     return {"read": reads, "write": writes, "roundtrip": full}
 
 
+def seed_pasteboard(pb, png: bytes, tiff: bytes) -> None:
+    from clipfit import clipboard
+
+    clipboard._ensure_appkit()
+    pb.clearContents()
+    png_data = clipboard.NSData.dataWithBytes_length_(png, len(png))
+    tiff_data = clipboard.NSData.dataWithBytes_length_(tiff, len(tiff))
+    if not pb.setData_forType_(png_data, clipboard.NSPasteboardTypePNG):
+        raise RuntimeError("failed to seed PNG on unique pasteboard")
+    if not pb.setData_forType_(tiff_data, clipboard.NSPasteboardTypeTIFF):
+        raise RuntimeError("failed to seed TIFF on unique pasteboard")
+
+
 def cold_subprocess_samples(
-    data: bytes,
+    png: bytes,
+    tiff: bytes,
     iters: int = COLD_ITERS,
 ) -> list[float]:
-    import tempfile
+    from clipfit import clipboard
+
+    if not clipboard._APPKIT_OK:
+        raise RuntimeError("AppKit is required for the cold clipboard benchmark")
 
     worker = Path(__file__).with_name("cold_worker.py")
     env = os.environ.copy()
@@ -253,21 +284,28 @@ def cold_subprocess_samples(
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
     samples = []
-    with tempfile.NamedTemporaryFile(suffix=".bin", delete=True) as fh:
-        fh.write(data)
-        fh.flush()
+    with unique_pasteboard() as src, unique_pasteboard() as dst:
+        seed_pasteboard(src, png, tiff)
+        src_name = src.name()
+        dst_name = dst.name()
         for _ in range(iters):
             t0 = time.perf_counter()
             proc = subprocess.run(
-                [sys.executable, str(worker), "--input", fh.name],
-                check=True,
+                [
+                    sys.executable,
+                    str(worker),
+                    "--source",
+                    src_name,
+                    "--dest",
+                    dst_name,
+                ],
                 capture_output=True,
                 text=True,
                 env=env,
             )
             samples.append((time.perf_counter() - t0) * 1000.0)
             if proc.returncode != 0:
-                raise RuntimeError(proc.stderr)
+                raise RuntimeError(proc.stderr or proc.stdout)
     return samples
 
 
@@ -322,14 +360,15 @@ def main() -> None:
         print(f"  roundtrip  {_fmt_ms(cb['roundtrip'])}")
 
     print()
-    print("Cold subprocess (Python launch + imports + shrink, p50 / p95 ms)")
-    for label, payload in (
-        ("13-inch png", make_corpus_png("browser", 2560, 1600)),
-        ("4K png", make_corpus_png("browser", 3840, 2160)),
-        ("6K png", make_corpus_png("browser", 6016, 3384)),
-        ("4K tiff", png_to_tiff(make_corpus_png("browser", 3840, 2160))),
+    print("Cold subprocess (launch + imports + clipboard + shrink, p50 / p95 ms)")
+    for label, w, h in (
+        ("13-inch", 2560, 1600),
+        ("4K", 3840, 2160),
+        ("6K", 6016, 3384),
     ):
-        samples = cold_subprocess_samples(payload)
+        png = make_corpus_png("browser", w, h)
+        tiff = png_to_tiff(png)
+        samples = cold_subprocess_samples(png, tiff)
         print(f"  {label:<16}{_fmt_ms(samples)}")
 
 
