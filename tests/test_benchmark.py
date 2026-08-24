@@ -28,7 +28,19 @@ def test_machine_info_matches_pillow_features():
     info = bench.machine_info()
     assert info["pillow"] == Image.__version__
     assert info["zlib"] == (features.version_codec("zlib") or "unknown")
-    assert info["zlib-ng"] == (features.version_feature("zlib_ng") or "none")
+    try:
+        expected_ng = features.version_feature("zlib_ng") or "none"
+    except ValueError:
+        expected_ng = "none"
+    assert info["zlib-ng"] == expected_ng
+
+
+def test_machine_info_zlib_ng_none_on_old_pillow(monkeypatch):
+    def boom(_name):
+        raise ValueError("unknown feature")
+
+    monkeypatch.setattr(bench.features, "version_feature", boom)
+    assert bench.machine_info()["zlib-ng"] == "none"
 
 
 def test_corpus_kinds_are_valid_pngs():

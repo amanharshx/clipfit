@@ -58,12 +58,16 @@ def p50_p95(samples: list[float]) -> tuple[float, float]:
 
 
 def machine_info() -> dict[str, str]:
+    try:
+        zlib_ng = features.version_feature("zlib_ng") or "none"
+    except ValueError:
+        zlib_ng = "none"
     return {
         "platform": platform.platform(),
         "python": sys.version.split()[0],
         "pillow": Image.__version__,
         "zlib": features.version_codec("zlib") or "unknown",
-        "zlib-ng": features.version_feature("zlib_ng") or "none",
+        "zlib-ng": zlib_ng,
     }
 
 
