@@ -55,6 +55,32 @@ def test_retries_level_6_before_quantizing_when_level_3_misses_budget(monkeypatc
         assert img.mode != "P"
 
 
+def test_skips_level_6_when_level_3_is_far_over_budget(monkeypatch):
+    levels = []
+
+    def encode(img, compress_level=3):
+        levels.append(compress_level)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", compress_level=6)
+        png = buf.getvalue()
+        if compress_level == 3:
+            return png + bytes(DEFAULT_MAX_BYTES * 2)
+        return png
+
+    monkeypatch.setattr("clipfit.core._encode_png", encode)
+
+    def quant(*_args, **_kwargs):
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 8), (1, 2, 3)).quantize(colors=256).save(buf, format="PNG")
+        return buf.getvalue()
+
+    monkeypatch.setattr("clipfit.core._encode_png_quantized", quant)
+
+    _out, res = shrink_image_bytes(_png(4000, 3000), max_dim=1568)
+    assert levels == [3]
+    assert "quantized" in res.strategy
+
+
 def test_downscales_oversized_landscape():
     data = _png(4000, 3000)
     out, res = shrink_image_bytes(data, max_dim=1568)

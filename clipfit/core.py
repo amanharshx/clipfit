@@ -37,6 +37,10 @@ DEFAULT_MAX_BYTES = 3_700_000
 # lower when the byte budget forces it; the byte limit is a hard guarantee.
 QUALITY_FLOOR = 640
 
+# Level 3 vs 6 is typically ~2–3% of file size. Retry the slower encode only
+# when the miss is in that band; far-over images go straight to the quantizer.
+_LEVEL6_RETRY_RATIO = 1.05
+
 
 @dataclass
 class ShrinkResult:
@@ -159,11 +163,11 @@ def shrink_image_bytes(
         )
         resized = _normalize_for_png(resized)
 
-        # Full-color PNG first (level 3). If that misses the budget, retry
-        # level 6 before quantizing so a few extra compressed bytes cannot
-        # drop a full-color image to a 256-color palette.
+        # Full-color PNG first (level 3). Near-budget misses retry level 6
+        # so a few extra bytes cannot drop RGB to a 256-color palette.
+        # Gross misses skip that encode and quantize immediately.
         full = _encode_png(resized)
-        if len(full) > max_bytes:
+        if max_bytes < len(full) <= int(max_bytes * _LEVEL6_RETRY_RATIO):
             tighter = _encode_png(resized, compress_level=6)
             if len(tighter) < len(full):
                 full = tighter
