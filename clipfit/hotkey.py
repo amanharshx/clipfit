@@ -157,8 +157,19 @@ def clipfit_binary() -> str:
     return str(Path(sys.executable).parent / "clipfit")
 
 
+def clipfit_client_binary() -> str:
+    """Path to the stdlib-only hotkey client. Does not load Pillow."""
+    found = shutil.which("clipfit-client")
+    if found:
+        return found
+    argv0 = Path(sys.argv[0])
+    if argv0.name == "clipfit-client":
+        return str(argv0 if argv0.is_absolute() else argv0.resolve())
+    return str(Path(sys.executable).parent / "clipfit-client")
+
+
 def _binding_command() -> str:
-    return f"{clipfit_binary()} --quiet --notify --sound"
+    return f"{clipfit_client_binary()} --quiet --notify --sound"
 
 
 def current_binding() -> tuple[str, str] | None:

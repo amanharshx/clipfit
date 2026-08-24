@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 clipfit = "clipfit.cli:main"
+clipfit-client = "clipfit.client:main"
 
 [tool.setuptools]
 packages = ["clipfit"]

@@ -31,6 +31,7 @@ USAGE
   clipfit [options]           shrink the image on the clipboard (default)
   clipfit <file> [options]    shrink an image file -> writes <name>_fit.png
   clipfit hotkey <command>    manage the keyboard shortcut
+  clipfit worker              run the resident worker (keeps imports warm)
 
 HOTKEY COMMANDS
   clipfit hotkey set          choose/change the shortcut (interactive)
@@ -388,6 +389,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "hotkey":
         return _run_hotkey(argv[1:])
+    if argv and argv[0] == "worker":
+        from .worker import serve
+
+        serve()
+        return 0
     if argv and argv[0] == "--version":
         print(f"clipfit {__version__}")
         return 0
