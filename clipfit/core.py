@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 class ByteBudgetError(ValueError):
@@ -118,8 +118,10 @@ def shrink_image_bytes(
     original_bytes = len(data)
     with Image.open(io.BytesIO(data)) as img:
         img.load()
-        ow, oh = img.size
-        base = img.copy()
+        # Bake in EXIF orientation so rotated phone/camera JPEGs are not saved
+        # sideways when re-encoded to PNG (PNG has no orientation tag).
+        base = ImageOps.exif_transpose(img).copy()
+    ow, oh = base.size
 
     longest = max(ow, oh)
 

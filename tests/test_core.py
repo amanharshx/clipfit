@@ -170,3 +170,20 @@ def test_force_png_converts_jpeg_to_png():
     with Image.open(io.BytesIO(out)) as img:
         assert img.format == "PNG"
         assert img.size == (800, 600)
+
+
+def test_force_png_applies_exif_orientation():
+    # A 40x20 JPEG tagged Orientation=6 displays as 20x40. The output PNG must
+    # bake in that rotation (PNG has no orientation tag), not stay sideways.
+    img = Image.new("RGB", (40, 20), (200, 10, 10))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Orientation
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    data = buf.getvalue()
+
+    out, res = shrink_image_bytes(data, force_png=True)
+    assert res.new_size == (20, 40)
+    with Image.open(io.BytesIO(out)) as result:
+        assert result.size == (20, 40)
+        assert result.getexif().get(0x0112, 1) == 1  # no leftover orientation
