@@ -75,15 +75,15 @@ looks at the image, not the display.
 The simplest way, once installed:
 
 ```bash
-clipfit worker
 clipfit hotkey set
+clipfit worker
 ```
 
-`clipfit worker` is a foreground process. It keeps Pillow and AppKit loaded so
-the hotkey does not pay Python startup on every press. There is no launchd or
-auto-start yet; leave that terminal open, or start the worker from a login
-item yourself. If the worker is not running, `clipfit-client` falls back to a
-normal `clipfit` process.
+First configure the hotkey, then start the worker. `clipfit worker` stays in
+the foreground, so leave that terminal open. It keeps Pillow and AppKit loaded
+so the hotkey does not pay Python startup on every press. There is no launchd
+or auto-start yet. If the worker is not running, `clipfit-client` falls back
+to a normal `clipfit` process.
 
 `clipfit hotkey set` asks for a shortcut (Enter accepts the default,
 Option+Shift+V), writes an skhd binding to `clipfit-client` in a marked block
@@ -126,8 +126,8 @@ clipfit --max-dim 2000     # set a different longest-edge cap
 clipfit --max-bytes 3.5mb  # set a different size budget
 clipfit path/to/img.png    # shrink a file instead; writes img_fit.png
 
-clipfit worker             # keep a warm process for the hotkey (foreground)
 clipfit hotkey set         # pick or change the shortcut (interactive)
+clipfit worker             # keep a warm process for the hotkey (foreground)
 clipfit hotkey show        # show the current shortcut and status
 clipfit hotkey remove      # remove the shortcut
 ```
