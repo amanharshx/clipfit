@@ -270,6 +270,21 @@ def test_original_bytes_reports_png_size_when_processing_tiff():
         assert img.format == "PNG"
 
 
+def test_exif_transpose_result_is_not_copied_again(monkeypatch):
+    # ImageOps.exif_transpose already returns a copy (or a transposed image).
+    # A second copy doubles peak RAM (~58 MiB extra at 6K RGB).
+    n = {"copies": 0}
+    orig = Image.Image.copy
+
+    def spy(self):
+        n["copies"] += 1
+        return orig(self)
+
+    monkeypatch.setattr(Image.Image, "copy", spy)
+    shrink_image_bytes(_png(800, 600))
+    assert n["copies"] == 1
+
+
 def test_force_png_applies_exif_orientation():
     # A 40x20 JPEG tagged Orientation=6 displays as 20x40. The output PNG must
     # bake in that rotation (PNG has no orientation tag), not stay sideways.
