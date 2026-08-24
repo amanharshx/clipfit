@@ -15,11 +15,15 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 class ByteBudgetError(ValueError):
     """Raised when no PNG can be produced under the requested byte budget."""
+
+
+class ClipfitImageError(ValueError):
+    """Raised when the input bytes cannot be read as an image."""
 
 # Most vision models internally downsample to roughly this size, so capping the
 # longest edge here shrinks filesize with essentially no quality loss to the model.
@@ -116,11 +120,14 @@ def shrink_image_bytes(
     than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
     """
     original_bytes = len(data)
-    with Image.open(io.BytesIO(data)) as img:
-        img.load()
-        # Bake in EXIF orientation so rotated phone/camera JPEGs are not saved
-        # sideways when re-encoded to PNG (PNG has no orientation tag).
-        base = ImageOps.exif_transpose(img).copy()
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.load()
+            # Bake in EXIF orientation so rotated phone/camera JPEGs are not
+            # saved sideways when re-encoded to PNG (PNG has no orientation tag).
+            base = ImageOps.exif_transpose(img).copy()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ClipfitImageError(f"not a readable image ({exc})") from exc
     ow, oh = base.size
 
     longest = max(ow, oh)
