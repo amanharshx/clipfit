@@ -107,6 +107,7 @@ def shrink_image_bytes(
     max_dim: int = DEFAULT_MAX_DIM,
     max_bytes: int = DEFAULT_MAX_BYTES,
     force_png: bool = False,
+    original_bytes: int | None = None,
 ) -> tuple[bytes, ShrinkResult]:
     """Downscale image bytes to satisfy both max_dim and max_bytes.
 
@@ -119,7 +120,8 @@ def shrink_image_bytes(
     Raises ByteBudgetError only when no PNG fits, which needs a budget smaller
     than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
     """
-    original_bytes = len(data)
+    if original_bytes is None:
+        original_bytes = len(data)
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.load()

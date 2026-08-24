@@ -185,6 +185,20 @@ def test_force_png_converts_jpeg_to_png():
         assert img.size == (800, 600)
 
 
+def test_original_bytes_can_be_the_png_size_not_processing_size():
+    # TIFF bytes are often larger than the PNG representation. Budget and
+    # summaries must use the original PNG size, not the processing payload.
+    png = _png(4000, 3000)
+    tiff_buf = io.BytesIO()
+    Image.new("RGB", (4000, 3000), (120, 30, 200)).save(tiff_buf, format="TIFF")
+    tiff = tiff_buf.getvalue()
+    assert len(tiff) > len(png)
+
+    _out, res = shrink_image_bytes(tiff, max_dim=1568, original_bytes=len(png))
+    assert res.original_bytes == len(png)
+    assert res.changed
+
+
 def test_force_png_applies_exif_orientation():
     # A 40x20 JPEG tagged Orientation=6 displays as 20x40. The output PNG must
     # bake in that rotation (PNG has no orientation tag), not stay sideways.

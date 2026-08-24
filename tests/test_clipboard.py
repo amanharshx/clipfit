@@ -23,7 +23,11 @@ def test_no_clipboard_image(monkeypatch, capsys):
 
 def test_clipboard_success_writes_shrunk(monkeypatch):
     written = {}
-    monkeypatch.setattr(clipboard, "read_image", lambda: _big_png())
+    monkeypatch.setattr(
+        clipboard,
+        "read_image",
+        lambda: clipboard.ClipboardImage(png=_big_png(), tiff=None),
+    )
     monkeypatch.setattr(clipboard, "write_png", lambda data: written.setdefault("data", data))
     rc = cli.main([])
     assert rc == 0
@@ -42,7 +46,11 @@ def test_clipboard_read_error(monkeypatch, capsys):
 
 
 def test_clipboard_write_error(monkeypatch, capsys):
-    monkeypatch.setattr(clipboard, "read_image", lambda: _big_png())
+    monkeypatch.setattr(
+        clipboard,
+        "read_image",
+        lambda: clipboard.ClipboardImage(png=_big_png(), tiff=None),
+    )
 
     def boom(_data):
         raise clipboard.ClipboardError("write failed")
@@ -89,24 +97,91 @@ def _small_png() -> bytes:
     return buf.getvalue()
 
 
+def _tiff(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (1, 2, 3)).save(buf, format="TIFF")
+    return buf.getvalue()
+
+
+def test_png_header_size_reads_ihdr():
+    png = _small_png()
+    assert clipboard.png_header_size(png) == (8, 8)
+
+
+def test_png_header_size_rejects_truncated():
+    assert clipboard.png_header_size(b"\x89PNG") is None
+    assert clipboard.png_header_size(b"not-png") is None
+
+
 @needs_appkit
-def test_read_prefers_png_over_tiff():
-    png = b"png-bytes"
-    tiff = b"tiff-bytes"
+def test_read_image_returns_both_representations():
+    png = _small_png()
+    tiff = _tiff(8, 8)
     pb = FakePasteboard(
         types={
             clipboard.NSPasteboardTypePNG: png,
             clipboard.NSPasteboardTypeTIFF: tiff,
         }
     )
-    assert clipboard.read_image(pasteboard=pb) == png
+    got = clipboard.read_image(pasteboard=pb)
+    assert got is not None
+    assert got.png == png
+    assert got.tiff == tiff
+
+
+@needs_appkit
+def test_small_png_within_limits_is_processing_bytes():
+    png = _small_png()
+    tiff = _tiff(8, 8)
+    clip = clipboard.ClipboardImage(png=png, tiff=tiff)
+    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == png
+
+
+@needs_appkit
+def test_oversized_png_uses_tiff_when_available():
+    png = _big_png()
+    tiff = _tiff(3000, 2000)
+    clip = clipboard.ClipboardImage(png=png, tiff=tiff)
+    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == tiff
+
+
+@needs_appkit
+def test_oversized_png_without_tiff_uses_png():
+    png = _big_png()
+    clip = clipboard.ClipboardImage(png=png, tiff=None)
+    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == png
+
+
+@needs_appkit
+def test_tiff_only_uses_tiff():
+    tiff = _tiff(3000, 2000)
+    clip = clipboard.ClipboardImage(png=None, tiff=tiff)
+    assert clip.bytes_for_processing(max_dim=1568, max_bytes=3_700_000) == tiff
+
+
+@needs_appkit
+def test_read_prefers_png_over_tiff():
+    png = _small_png()
+    tiff = _tiff(8, 8)
+    pb = FakePasteboard(
+        types={
+            clipboard.NSPasteboardTypePNG: png,
+            clipboard.NSPasteboardTypeTIFF: tiff,
+        }
+    )
+    got = clipboard.read_image(pasteboard=pb)
+    assert got is not None
+    assert got.png == png
 
 
 @needs_appkit
 def test_read_falls_back_to_tiff():
     tiff = b"tiff-only"
     pb = FakePasteboard(types={clipboard.NSPasteboardTypeTIFF: tiff})
-    assert clipboard.read_image(pasteboard=pb) == tiff
+    got = clipboard.read_image(pasteboard=pb)
+    assert got is not None
+    assert got.png is None
+    assert got.tiff == tiff
 
 
 @needs_appkit
@@ -144,7 +219,8 @@ def test_unique_pasteboard_roundtrip():
         clipboard.write_png(png, pasteboard=pb)
         got = clipboard.read_image(pasteboard=pb)
         assert got is not None
-        with Image.open(io.BytesIO(got)) as img:
+        assert got.png is not None
+        with Image.open(io.BytesIO(got.png)) as img:
             assert img.format == "PNG"
             assert img.size == (8, 8)
     finally:
