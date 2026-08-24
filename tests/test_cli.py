@@ -57,6 +57,21 @@ def test_invalid_env_var_is_rejected(monkeypatch):
         cli.main(["x.png"])
 
 
+def test_nonfinite_max_bytes_is_rejected(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["x.png", "--max-bytes", "inf"])
+    assert exc.value.code == 2
+    assert "invalid byte size" in capsys.readouterr().err
+
+
+def test_nonfinite_max_bytes_env_is_rejected(monkeypatch, capsys):
+    monkeypatch.setenv("CLIPFIT_MAX_BYTES", "1e999mb")
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["x.png"])
+    assert exc.value.code == 2
+    assert "invalid byte size" in capsys.readouterr().err
+
+
 def test_sound_plays_basso_on_error(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "_play_sound", lambda ok: calls.append(ok))

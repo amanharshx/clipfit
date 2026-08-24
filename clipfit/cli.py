@@ -7,6 +7,7 @@ manages the keyboard shortcut (set / show / remove).
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -101,8 +102,11 @@ def _parse_bytes(v: str) -> int:
     elif s.endswith("b"):
         s = s[:-1]
     try:
-        return int(float(s) * mult)
-    except ValueError:
+        value = float(s) * mult
+        if not math.isfinite(value):
+            raise ValueError("not a finite size")
+        return int(value)
+    except (ValueError, OverflowError):
         raise argparse.ArgumentTypeError(
             f"invalid byte size '{v}'; use a value such as 3.5mb"
         ) from None
