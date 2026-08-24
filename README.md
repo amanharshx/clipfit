@@ -5,12 +5,6 @@
 </p>
 
 <p align="center">
-  One hotkey resizes the screenshot on your clipboard so it fits an LLM's size
-  limits and costs fewer tokens, then you paste as usual. Aspect ratio kept,
-  text stays sharp.
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="Platform macOS">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -29,6 +23,8 @@
 
 > [!IMPORTANT]
 > clipfit is **macOS** only. It uses the macOS clipboard, and skhd for the hotkey, so it does not run on Windows or Linux.
+
+clipfit is a small macOS tool that shrinks the image on your clipboard so it is ready to paste into an LLM chat. It runs from one hotkey and keeps the text sharp.
 
 ## See it
 
