@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from clipfit.core import DEFAULT_MAX_BYTES, shrink_image_bytes
+from clipfit.core import DEFAULT_MAX_BYTES, QUALITY_FLOOR, shrink_image_bytes
 
 
 def _png(w: int, h: int) -> bytes:
@@ -79,3 +79,35 @@ def test_oversized_dims_but_recompresses_under_budget():
     assert res.changed
     assert max(res.new_size) == 1568
     assert len(out) <= DEFAULT_MAX_BYTES
+
+
+
+def test_output_always_fits_byte_budget():
+    # A noisy image with a tight budget must still come out under the budget.
+    data = _noisy_png(1600, 1200)
+    budget = 80_000
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert res.changed
+    assert len(out) <= budget
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "PNG"
+
+
+def test_can_resize_below_quality_floor():
+    # A budget too small to fit even at the floor must push resolution lower,
+    # and the result must warn that it went below the readable size.
+    data = _noisy_png(1600, 1200)
+    budget = 12_000
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert len(out) <= budget
+    assert max(res.new_size) < QUALITY_FLOOR
+    assert "hard to read" in res.note
+
+
+def test_extremely_small_budget_terminates():
+    # Even an impossibly small budget must terminate (not loop) and say so.
+    data = _noisy_png(1600, 1200)
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=10)
+    assert res.changed
+    assert res.new_size == (1, 1)
+    assert "could not get under" in res.note
