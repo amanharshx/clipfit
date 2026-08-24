@@ -17,6 +17,10 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+
+class ByteBudgetError(ValueError):
+    """Raised when no PNG can be produced under the requested byte budget."""
+
 # Most vision models internally downsample to roughly this size, so capping the
 # longest edge here shrinks filesize with essentially no quality loss to the model.
 DEFAULT_MAX_DIM = 1568
@@ -106,7 +110,10 @@ def shrink_image_bytes(
 
     Returns (possibly unchanged) image bytes plus a ShrinkResult. Aspect ratio
     is always preserved. If the input is already within both limits it is
-    returned untouched.
+    returned untouched. A successful return guarantees len(output) <= max_bytes.
+
+    Raises ByteBudgetError only when no PNG fits, which needs a budget smaller
+    than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
     """
     original_bytes = len(data)
     with Image.open(io.BytesIO(data)) as img:
@@ -154,18 +161,20 @@ def shrink_image_bytes(
             break
 
         if target_edge <= 1:
-            # Even a 1px image is over budget (an impossibly small max_bytes).
-            # Return the smallest we can make and say so plainly.
-            out_bytes, strategy = min(candidates, key=lambda c: len(c[0]))
-            note = (
-                f"could not get under {_human(max_bytes)}; "
-                "this is the smallest clipfit can make"
+            smallest = min(len(c[0]) for c in candidates)
+            raise ByteBudgetError(
+                f"cannot produce a PNG under {_human(max_bytes)} "
+                f"(smallest clipfit can make is {_human(smallest)})"
             )
-            break
 
-        # Nothing fit at this size. Shrink further, dropping below the floor if
-        # needed so the byte budget stays a hard guarantee.
-        target_edge = max(1, int(target_edge * 0.85))
+        # Nothing fit at this size. Shrink further, but land exactly on the
+        # readable floor when a plain step would skip past it, so we try 640px
+        # (with smaller palettes) before going below it.
+        next_edge = max(1, int(target_edge * 0.85))
+        if target_edge > QUALITY_FLOOR and next_edge < QUALITY_FLOOR:
+            target_edge = QUALITY_FLOOR
+        else:
+            target_edge = next_edge
 
     return out_bytes, ShrinkResult(
         changed=True,

@@ -1,8 +1,16 @@
 import io
 
+import pytest
 from PIL import Image
 
-from clipfit.core import DEFAULT_MAX_BYTES, QUALITY_FLOOR, shrink_image_bytes
+from clipfit.core import (
+    DEFAULT_MAX_BYTES,
+    QUALITY_FLOOR,
+    ByteBudgetError,
+    _encode_png_quantized,
+    _normalize_for_png,
+    shrink_image_bytes,
+)
 
 
 def _png(w: int, h: int) -> bytes:
@@ -104,10 +112,26 @@ def test_can_resize_below_quality_floor():
     assert "hard to read" in res.note
 
 
-def test_extremely_small_budget_terminates():
-    # Even an impossibly small budget must terminate (not loop) and say so.
+def test_tries_quality_floor_before_shrinking_below_it():
+    # A budget that fits at 640px (small palette) but not at the larger step
+    # above it must land exactly on 640px, not skip past to ~589px.
     data = _noisy_png(1600, 1200)
-    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=10)
-    assert res.changed
-    assert res.new_size == (1, 1)
-    assert "could not get under" in res.note
+    base = Image.open(io.BytesIO(data))
+
+    def size_at(edge: int, colors: int) -> int:
+        scale = edge / 1600
+        im = base.resize((round(1600 * scale), round(1200 * scale)), Image.Resampling.LANCZOS)
+        return len(_encode_png_quantized(_normalize_for_png(im), colors))
+
+    budget = size_at(QUALITY_FLOOR, 64)  # 640px / 64-color fits exactly
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert len(out) <= budget
+    assert max(res.new_size) == QUALITY_FLOOR
+
+
+def test_impossible_budget_raises():
+    # A budget smaller than any possible PNG must raise, so a successful return
+    # always means the output fit. Raising also proves the loop terminates.
+    data = _noisy_png(1600, 1200)
+    with pytest.raises(ByteBudgetError):
+        shrink_image_bytes(data, max_dim=1568, max_bytes=10)
