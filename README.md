@@ -16,6 +16,7 @@
   <a href="#set-up-the-hotkey">Set up the hotkey</a> ·
   <a href="#usage">Usage</a> ·
   <a href="#how-it-works">How it works</a> ·
+  <a href="#performance">Performance</a> ·
   <a href="#behavior-and-limitations">Behavior and limitations</a>
 </p>
 
@@ -40,7 +41,7 @@ image already fits, clipfit does nothing.
 | Before | After clipfit |
 | --- | --- |
 | 3420 × 2214, ~1 MB screenshot | 1568 × 1015, fits limits above |
-| 7680 × 4320 (8K), 86 MB | 1568 × 882, under clipfit's byte budget, in about half a second |
+| 6016 × 3384 (6K) synthetic screenshot | 1568 × 882, 1.59 MB |
 
 You run it per image. Copy the way you always do, then press a hotkey only when
 the image is going to an LLM. Nothing runs on every copy.
@@ -171,12 +172,42 @@ accepts 20 MB per image, and [Gemini Apps](https://support.google.com/gemini/ans
 accepts files up to 100 MB. Use `--max-bytes` or `CLIPFIT_MAX_BYTES` when
 another limit is preferable.
 
+## Performance
+
+Measured on a 15-inch MacBook Air with Apple M4 and 24 GB RAM, using
+Python 3.11.9, Pillow 12.3.0, and zlib-ng 2.3.3. Inputs are synthetic
+browser-like screenshots. Cold results include process launch, imports,
+clipboard read/write, and image processing.
+
+| Input | Cold p50 | Cold p95 | Output |
+| --- | --- | --- | --- |
+| 2560 × 1600 | 213 ms | 264 ms | 2.25 MB |
+| 3840 × 2160 (4K) | 224 ms | 227 ms | 1.79 MB |
+| 6016 × 3384 (6K) | 268 ms | 333 ms | 1.59 MB |
+
+The resident worker avoids repeatedly loading Pillow and AppKit. The
+Starting `clipfit-client` and completing its Unix-socket round trip takes
+about 38 ms p50.
+Measured components put typical resident-worker latency around 120–150 ms,
+depending on image size and content. That 120–150 ms range is derived from
+those components, not a single production end-to-end measurement.
+
+Run the full benchmark locally with:
+
+```bash
+python -m bench.benchmark
+```
+
+The benchmark uses unique pasteboards and never replaces the general
+clipboard.
+
 ## Large and ultrawide screenshots
 
 Screen size does not matter. clipfit caps the longest edge, so a bigger capture
-just shrinks more. A full 8K grab (7680 × 4320, about 86 MB) comes out at
-1568 × 882 and under 5 MB, in about half a second. The slow part is decoding the
-large source, so very big images take a bit longer than a laptop screenshot.
+just shrinks more. A synthetic 6K screenshot completed the full cold path in
+268 ms p50 on the benchmark machine (table above). The slow part is decoding
+the large source, so very big images take a bit longer than a laptop
+screenshot.
 
 Ultrawide is the one trade-off. A 5120 × 1440 screen shrinks to 1568 × 441. It
 fits and pastes, but 441px tall makes the text small and harder for the model
