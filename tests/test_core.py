@@ -270,6 +270,25 @@ def test_original_bytes_reports_png_size_when_processing_tiff():
         assert img.format == "PNG"
 
 
+def test_does_not_copy_exif_transpose_result(monkeypatch):
+    # ImageOps.exif_transpose already returns a new image. Copying that
+    # result again adds about 58 MB peak RAM at 6K RGB.
+    transposed = Image.new("RGB", (800, 600), (1, 2, 3))
+    copies = {"n": 0}
+    orig_copy = transposed.copy
+
+    def spy():
+        copies["n"] += 1
+        return orig_copy()
+
+    transposed.copy = spy
+    monkeypatch.setattr(
+        "clipfit.core.ImageOps.exif_transpose", lambda img, **_k: transposed
+    )
+    shrink_image_bytes(_png(800, 600))
+    assert copies["n"] == 0
+
+
 def test_force_png_applies_exif_orientation():
     # A 40x20 JPEG tagged Orientation=6 displays as 20x40. The output PNG must
     # bake in that rotation (PNG has no orientation tag), not stay sideways.

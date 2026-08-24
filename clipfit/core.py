@@ -132,7 +132,7 @@ def shrink_image_bytes(
             img.load()
             # Bake in EXIF orientation so rotated phone/camera JPEGs are not
             # saved sideways when re-encoded to PNG (PNG has no orientation tag).
-            base = ImageOps.exif_transpose(img).copy()
+            base = ImageOps.exif_transpose(img)
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ClipfitImageError(f"not a readable image ({exc})") from exc
     ow, oh = base.size
