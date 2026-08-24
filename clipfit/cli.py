@@ -215,18 +215,29 @@ def _run_shrink(argv: list[str]) -> int:
 
 # --- hotkey commands ----------------------------------------------------------
 
-def _hotkey_after_set(hk, quiet: bool = False) -> None:
-    """Restart skhd and print Accessibility guidance."""
-    hk.restart_service()
-    if hk.accessibility_ok():
+def _hotkey_after_set(hk) -> None:
+    """Restart skhd. Accessibility help only if skhd exists but is not running."""
+    if hk.restart_service():
         print("  skhd is running with Accessibility. You're all set.")
         print("  Copy an image, press your shortcut, then paste.")
+        return
+    print()
+    print("\u26a0 skhd needs Accessibility permission to catch the shortcut.")
+    print("  Opening System Settings \u2192 Privacy & Security \u2192 Accessibility.")
+    print(f"  Turn on skhd ({hk.skhd_binary_path()}), then run:  clipfit hotkey show")
+    hk.open_accessibility_pane()
+
+
+def _apply_hotkey(hk, parsed, existing) -> int:
+    hk.set_binding(parsed)
+    if existing and parsed.skhd == existing[0]:
+        print(f"\u2713 Hotkey unchanged: {parsed.pretty}")
+    elif existing:
+        print(f"\u2713 Hotkey changed: {existing[1]} \u2192 {parsed.pretty}")
     else:
-        print()
-        print("\u26a0 skhd needs Accessibility permission to catch the shortcut.")
-        print("  Opening System Settings \u2192 Privacy & Security \u2192 Accessibility.")
-        print(f"  Turn on skhd ({hk.skhd_binary_path()}), then run:  clipfit hotkey show")
-        hk.open_accessibility_pane()
+        print(f"\u2713 Hotkey set: {parsed.pretty}")
+    _hotkey_after_set(hk)
+    return 0
 
 
 def _hotkey_set(argv: list[str]) -> int:
@@ -240,6 +251,10 @@ def _hotkey_set(argv: list[str]) -> int:
     if args.help:
         print(HOTKEY_HELP)
         return 0
+
+    if not hk.skhd_available():
+        print(f"clipfit: {hk.missing_skhd_message()}")
+        return 2
 
     existing = hk.current_binding()
 
@@ -256,14 +271,7 @@ def _hotkey_set(argv: list[str]) -> int:
             print(f"\u26a0 {parsed.skhd} is already bound in your skhd config to something else.")
             print("  Pick a different combo, or edit ~/.config/skhd/skhdrc yourself.")
             return 2
-        hk.set_binding(parsed)
-        if existing:
-            print(f"\u2713 Hotkey set: {parsed.pretty}")
-        else:
-            print(f"\u2713 Hotkey set: {parsed.pretty}")
-        print("  skhd reloaded.")
-        hk.restart_service()
-        return 0
+        return _apply_hotkey(hk, parsed, existing)
 
     # Interactive path.
     if existing:
@@ -301,20 +309,7 @@ def _hotkey_set(argv: list[str]) -> int:
         break
 
     print()
-    if existing and parsed.skhd == existing[0]:
-        print(f"\u2713 Hotkey unchanged: {parsed.pretty}")
-        hk.set_binding(parsed)
-        _hotkey_after_set(hk)
-        return 0
-
-    hk.set_binding(parsed)
-    if existing:
-        print(f"\u2713 Hotkey changed: {old_pretty} \u2192 {parsed.pretty}")
-    else:
-        print(f"\u2713 Hotkey set: {parsed.pretty}")
-        print("  Writing skhd config\u2026 done")
-    _hotkey_after_set(hk)
-    return 0
+    return _apply_hotkey(hk, parsed, existing)
 
 
 def _hotkey_show(argv: list[str]) -> int:
@@ -326,15 +321,19 @@ def _hotkey_show(argv: list[str]) -> int:
         return 0
 
     _skhd_combo, pretty = binding
-    running = hk.service_running()
     print(f"Current shortcut:  {pretty}")
     print(f"Runs:              clipfit")
+    if not hk.skhd_available():
+        print("skhd:              not found")
+        print(f"clipfit: {hk.missing_skhd_message()}")
+        return 2
+    running = hk.service_running()
     print(f"skhd service:      {'running' if running else 'not running'}")
-    if hk.accessibility_ok():
-        print(f"Accessibility:     granted")
+    if running:
+        print("Accessibility:     granted")
     else:
-        print(f"Accessibility:     looks missing \u2014 turn on skhd in "
-              f"System Settings \u2192 Accessibility")
+        print("Accessibility:     looks missing \u2014 turn on skhd in "
+              "System Settings \u2192 Accessibility")
     return 0
 
 
@@ -343,12 +342,19 @@ def _hotkey_remove(argv: list[str]) -> int:
 
     existing = hk.current_binding()
     removed = hk.remove_binding()
-    if removed:
-        hk.restart_service()
-        pretty = existing[1] if existing else "unknown"
+    if not removed:
+        print("Nothing to remove \u2014 no clipfit hotkey is set.")
+        return 0
+    pretty = existing[1] if existing else "unknown"
+    # Reload only if skhd is already running. A stopped install must stay
+    # stopped: restart_service() would pick --start-service.
+    reloaded = False
+    if hk.skhd_available() and hk.service_running():
+        reloaded = hk.restart_service()
+    if reloaded:
         print(f"Removed the clipfit hotkey (was {pretty}). skhd reloaded.")
     else:
-        print("Nothing to remove \u2014 no clipfit hotkey is set.")
+        print(f"Removed the clipfit hotkey (was {pretty}).")
     return 0
 
 

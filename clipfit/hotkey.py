@@ -224,27 +224,41 @@ def remove_binding() -> bool:
 
 # --- skhd service -------------------------------------------------------------
 
-def _skhd_available() -> bool:
+def skhd_available() -> bool:
     return shutil.which("skhd") is not None
 
 
-def restart_service() -> None:
-    if not _skhd_available():
-        return
-    subprocess.run(["skhd", "--restart-service"], check=False,
-                   capture_output=True, timeout=15)
+def missing_skhd_message() -> str:
+    return (
+        "skhd not found. Install it with `brew install asmvik/formulae/skhd`, "
+        "or bind clipfit through another launcher. "
+        "pipx and source installs do not include skhd."
+    )
+
+
+def restart_service() -> bool:
+    """Start or restart skhd. True if a skhd process is running afterward.
+
+    Use --start-service when no process is up: that installs the LaunchAgent
+    if brew never created one. --restart-service errors without that file.
+    """
+    if not skhd_available():
+        return False
+    flag = "--restart-service" if service_running() else "--start-service"
+    try:
+        subprocess.run(
+            ["skhd", flag],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return service_running()
 
 
 def service_running() -> bool:
     return subprocess.run(["pgrep", "-x", "skhd"], capture_output=True).returncode == 0
-
-
-def accessibility_ok() -> bool:
-    """Heuristic: skhd only stays running if it has Accessibility access.
-
-    skhd aborts immediately without it, so a live process is a reliable signal.
-    """
-    return service_running()
 
 
 def open_accessibility_pane() -> None:

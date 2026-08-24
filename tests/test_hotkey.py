@@ -115,3 +115,40 @@ def test_no_conflict_with_clipfit_own_block(hk):
     hk.set_binding(hk.parse_hotkey("cmd+shift+v"))
     # clipfit's own block must not count as a conflict
     assert hk.find_conflict("cmd + shift - v") is None
+
+
+def test_restart_false_when_skhd_missing(hk, monkeypatch):
+    monkeypatch.setattr(hk.shutil, "which", lambda _name: None)
+    assert hk.skhd_available() is False
+    assert hk.restart_service() is False
+
+
+def test_starts_service_when_skhd_is_not_running(hk, monkeypatch):
+    monkeypatch.setattr(hk.shutil, "which", lambda _name: "/opt/homebrew/bin/skhd")
+    seen = []
+
+    def fake_run(cmd, *a, **k):
+        seen.append(cmd)
+        if cmd[:1] == ["pgrep"] or (isinstance(cmd, list) and cmd[0] == "pgrep"):
+            # First probe: down. After start: up.
+            return type("R", (), {"returncode": 0 if any("skhd" in str(c) and "--start-service" in c for c in seen) else 1})()
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr(hk.subprocess, "run", fake_run)
+    assert hk.restart_service() is True
+    assert ["skhd", "--start-service"] in seen
+    assert ["skhd", "--restart-service"] not in seen
+
+
+def test_restarts_service_when_skhd_already_running(hk, monkeypatch):
+    monkeypatch.setattr(hk.shutil, "which", lambda _name: "/opt/homebrew/bin/skhd")
+    seen = []
+
+    def fake_run(cmd, *a, **k):
+        seen.append(cmd)
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr(hk.subprocess, "run", fake_run)
+    assert hk.restart_service() is True
+    assert ["skhd", "--restart-service"] in seen
+    assert ["skhd", "--start-service"] not in seen

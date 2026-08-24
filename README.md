@@ -57,7 +57,8 @@ With pipx:
 pipx install git+https://github.com/amanharshx/clipfit
 ```
 
-pipx installs clipfit only. Install skhd separately (`brew install skhd`) if you
+pipx installs clipfit only. Install skhd separately
+(`brew install asmvik/formulae/skhd`) if you
 want `clipfit hotkey set`, or bind clipfit through another launcher.
 
 Needs macOS (it uses `NSPasteboard` through pyobjc) and Python 3.9 or newer.
@@ -78,6 +79,9 @@ It asks for a shortcut (Enter accepts the default, Option+Shift+V), writes an
 skhd binding in a marked block in your `~/.config/skhd/skhdrc`, starts skhd, and
 opens the Accessibility pane so you can allow skhd. After that: copy an image,
 press the shortcut, then paste. Only that keypress touches the clipboard.
+
+`clipfit hotkey set` needs skhd on your PATH. If it is missing, clipfit says so
+and exits; it does not treat that as an Accessibility problem.
 
 macOS asks you to grant skhd Accessibility once. No installer can do this for
 you; it is an OS security prompt. Run `clipfit hotkey show` to confirm the
