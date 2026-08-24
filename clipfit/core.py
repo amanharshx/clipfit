@@ -17,6 +17,10 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+
+class ByteBudgetError(ValueError):
+    """Raised when no PNG can be produced under the requested byte budget."""
+
 # Most vision models internally downsample to roughly this size, so capping the
 # longest edge here shrinks filesize with essentially no quality loss to the model.
 DEFAULT_MAX_DIM = 1568
@@ -25,8 +29,9 @@ DEFAULT_MAX_DIM = 1568
 # raw <= 5,242,880 * 3/4 = 3,932,160; leave headroom for JSON/data-URI overhead.
 DEFAULT_MAX_BYTES = 3_700_000
 
-# Don't shrink resolution below this longest edge when chasing the byte budget.
-MIN_DIM = 640
+# Below this longest edge, text starts to get hard to read. clipfit only goes
+# lower when the byte budget forces it; the byte limit is a hard guarantee.
+QUALITY_FLOOR = 640
 
 
 @dataclass
@@ -47,10 +52,13 @@ class ShrinkResult:
         if not self.changed:
             return f"already within limits ({ow}x{oh}, {_human(self.original_bytes)}) - {self.note}"
         extra = f" [{self.strategy}]" if self.strategy else ""
-        return (
+        line = (
             f"{ow}x{oh} ({_human(self.original_bytes)}) "
             f"-> {nw}x{nh} ({_human(self.new_bytes)}){extra}"
         )
+        if self.note:
+            line += f" - {self.note}"
+        return line
 
 
 def _human(n: float) -> str:
@@ -74,14 +82,20 @@ def _encode_png(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def _encode_png_quantized(img: Image.Image) -> bytes:
-    # 256-color adaptive palette: dramatic size cut for screenshots/UI/text,
-    # visually near-lossless for such content.
+def _encode_png_quantized(img: Image.Image, colors: int = 256) -> bytes:
+    # Adaptive palette: dramatic size cut for screenshots/UI/text, visually
+    # near-lossless for such content. Fewer colors = smaller file.
     rgb = img.convert("RGBA") if "A" in img.getbands() else img.convert("RGB")
-    q = rgb.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+    q = rgb.quantize(colors=colors, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
     buf = io.BytesIO()
     q.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _floor_note(longest_edge: int) -> str:
+    if longest_edge < QUALITY_FLOOR:
+        return f"output is below {QUALITY_FLOOR}px; text may be hard to read"
+    return ""
 
 
 def shrink_image_bytes(
@@ -93,7 +107,10 @@ def shrink_image_bytes(
 
     Returns (possibly unchanged) image bytes plus a ShrinkResult. Aspect ratio
     is always preserved. If the input is already within both limits it is
-    returned untouched.
+    returned untouched. A successful return guarantees len(output) <= max_bytes.
+
+    Raises ByteBudgetError only when no PNG fits, which needs a budget smaller
+    than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
     """
     original_bytes = len(data)
     with Image.open(io.BytesIO(data)) as img:
@@ -115,7 +132,6 @@ def shrink_image_bytes(
         )
 
     target_edge = min(max_dim, longest)
-    best: tuple[bytes, tuple[int, int], str] | None = None
 
     while True:
         scale = target_edge / longest
@@ -126,31 +142,43 @@ def shrink_image_bytes(
         )
         resized = _normalize_for_png(resized)
 
-        png = _encode_png(resized)
-        if len(png) <= max_bytes:
-            strat = "resized" if target_edge < longest else "reencoded"
-            best = (png, (nw, nh), strat)
+        # Try full-color PNG first (best quality), then progressively smaller
+        # palettes once we are at or below the readable floor.
+        candidates: list[tuple[bytes, str]] = [
+            (_encode_png(resized), "resized" if target_edge < longest else "reencoded"),
+        ]
+        palettes = [256] + ([128, 64] if target_edge <= QUALITY_FLOOR else [])
+        for colors in palettes:
+            candidates.append((_encode_png_quantized(resized, colors), f"quantized {colors}c"))
+
+        fit = next((c for c in candidates if len(c[0]) <= max_bytes), None)
+        if fit is not None:
+            out_bytes, strategy = fit
+            note = _floor_note(target_edge)
             break
 
-        quant = _encode_png_quantized(resized)
-        if len(quant) <= max_bytes:
-            best = (quant, (nw, nh), "quantized")
-            break
+        if target_edge <= 1:
+            smallest = min(len(c[0]) for c in candidates)
+            raise ByteBudgetError(
+                f"cannot produce a PNG under {_human(max_bytes)} "
+                f"(smallest clipfit can make is {_human(smallest)})"
+            )
 
-        # Track smallest-so-far in case we bottom out at MIN_DIM.
-        smaller = quant if len(quant) < len(png) else png
-        best = (smaller, (nw, nh), "min-dim best-effort")
+        # Nothing fit at this size. Shrink further, but land exactly on the
+        # readable floor when a plain step would skip past it, so we try 640px
+        # (with smaller palettes) before going below it.
+        next_edge = max(1, int(target_edge * 0.85))
+        if target_edge > QUALITY_FLOOR and next_edge < QUALITY_FLOOR:
+            target_edge = QUALITY_FLOOR
+        else:
+            target_edge = next_edge
 
-        if target_edge <= MIN_DIM:
-            break
-        target_edge = max(MIN_DIM, int(target_edge * 0.85))
-
-    new_data, (nw, nh), strategy = best
-    return new_data, ShrinkResult(
+    return out_bytes, ShrinkResult(
         changed=True,
         original_size=(ow, oh),
         new_size=(nw, nh),
         original_bytes=original_bytes,
-        new_bytes=len(new_data),
+        new_bytes=len(out_bytes),
         strategy=strategy,
+        note=note,
     )

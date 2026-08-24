@@ -1,8 +1,16 @@
 import io
 
+import pytest
 from PIL import Image
 
-from clipfit.core import DEFAULT_MAX_BYTES, shrink_image_bytes
+from clipfit.core import (
+    DEFAULT_MAX_BYTES,
+    QUALITY_FLOOR,
+    ByteBudgetError,
+    _encode_png_quantized,
+    _normalize_for_png,
+    shrink_image_bytes,
+)
 
 
 def _png(w: int, h: int) -> bytes:
@@ -79,3 +87,61 @@ def test_oversized_dims_but_recompresses_under_budget():
     assert res.changed
     assert max(res.new_size) == 1568
     assert len(out) <= DEFAULT_MAX_BYTES
+
+
+
+def test_output_always_fits_byte_budget():
+    # A noisy image with a tight budget must still come out under the budget.
+    data = _noisy_png(1600, 1200)
+    budget = 80_000
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert res.changed
+    assert len(out) <= budget
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "PNG"
+
+
+def test_can_resize_below_quality_floor():
+    # A budget too small to fit even at the floor must push resolution lower,
+    # and the result must warn that it went below the readable size.
+    data = _noisy_png(1600, 1200)
+    budget = 12_000
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert len(out) <= budget
+    assert max(res.new_size) < QUALITY_FLOOR
+    assert "hard to read" in res.note
+
+
+def test_tries_quality_floor_before_shrinking_below_it():
+    # A budget that fits at 640px (small palette) but not at the larger step
+    # above it must land exactly on 640px, not skip past to ~589px.
+    data = _noisy_png(1600, 1200)
+    base = Image.open(io.BytesIO(data))
+
+    def size_at(edge: int, colors: int) -> int:
+        scale = edge / 1600
+        im = base.resize((round(1600 * scale), round(1200 * scale)), Image.Resampling.LANCZOS)
+        return len(_encode_png_quantized(_normalize_for_png(im), colors))
+
+    budget = size_at(QUALITY_FLOOR, 64)  # 640px / 64-color fits exactly
+    out, res = shrink_image_bytes(data, max_dim=1568, max_bytes=budget)
+    assert len(out) <= budget
+    assert max(res.new_size) == QUALITY_FLOOR
+
+
+def test_impossible_budget_raises():
+    # A budget smaller than any possible PNG must raise, so a successful return
+    # always means the output fit. Raising also proves the loop terminates.
+    data = _noisy_png(1600, 1200)
+    with pytest.raises(ByteBudgetError):
+        shrink_image_bytes(data, max_dim=1568, max_bytes=10)
+
+
+def test_max_dim_below_floor_does_not_blame_budget():
+    # Going below 640px because the user asked for --max-dim 500 (with plenty of
+    # byte budget) must not claim the byte budget forced it.
+    data = _png(1600, 1200)
+    _out, res = shrink_image_bytes(data, max_dim=500, max_bytes=DEFAULT_MAX_BYTES)
+    assert max(res.new_size) == 500
+    assert "byte budget" not in res.note
+    assert "hard to read" in res.note
