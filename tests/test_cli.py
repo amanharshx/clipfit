@@ -23,6 +23,18 @@ def test_version(capsys):
     assert "clipfit" in capsys.readouterr().out
 
 
+def test_runtime_version_matches_pyproject():
+    import re
+    from pathlib import Path
+
+    from clipfit import __version__
+
+    text = Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text()
+    pkg = re.search(r'^version = "([^"]+)"', text, re.M)
+    assert pkg is not None
+    assert __version__ == pkg.group(1)
+
+
 def test_missing_file(tmp_path, capsys):
     rc = cli.main([str(tmp_path / "nope.png")])
     assert rc == 1
