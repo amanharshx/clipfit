@@ -13,7 +13,13 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core import DEFAULT_MAX_BYTES, DEFAULT_MAX_DIM, shrink_image_bytes
+from .core import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_DIM,
+    ByteBudgetError,
+    ClipfitImageError,
+    shrink_image_bytes,
+)
 
 DEFAULT_HOTKEY = "option+shift+v"
 
@@ -94,7 +100,12 @@ def _parse_bytes(v: str) -> int:
         mult, s = 1024, s[:-2]
     elif s.endswith("b"):
         s = s[:-1]
-    return int(float(s) * mult)
+    try:
+        return int(float(s) * mult)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid byte size '{v}'; use a value such as 3.5mb"
+        ) from None
 
 
 # --- shrink command -----------------------------------------------------------
@@ -112,7 +123,11 @@ def _shrink_clipboard(max_dim: int, max_bytes: int, quiet: bool, notify: bool) -
         _report("no image on the clipboard - nothing to do", quiet, notify)
         return 1
 
-    new_data, result = shrink_image_bytes(data, max_dim=max_dim, max_bytes=max_bytes)
+    try:
+        new_data, result = shrink_image_bytes(data, max_dim=max_dim, max_bytes=max_bytes)
+    except (ClipfitImageError, ByteBudgetError) as exc:
+        _report(str(exc), quiet=False, notify=notify)
+        return 2
     if not result.changed:
         _report(result.summary(), quiet, notify)
         return 0
@@ -131,15 +146,33 @@ def _shrink_file(path: Path, max_dim: int, max_bytes: int, quiet: bool, notify: 
     if not path.exists():
         _report(f"file not found: {path}", quiet=False, notify=notify)
         return 1
+    if not path.is_file():
+        _report(f"not a file: {path}", quiet=False, notify=notify)
+        return 1
 
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        _report(f"could not read {path}: {exc}", quiet=False, notify=notify)
+        return 2
+
     # File mode always writes a PNG next to the source, even if no resize is
     # needed, so the advertised <name>_fit.png is always produced.
-    new_data, result = shrink_image_bytes(
-        data, max_dim=max_dim, max_bytes=max_bytes, force_png=True
-    )
+    try:
+        new_data, result = shrink_image_bytes(
+            data, max_dim=max_dim, max_bytes=max_bytes, force_png=True
+        )
+    except (ClipfitImageError, ByteBudgetError) as exc:
+        _report(f"could not process {path}: {exc}", quiet=False, notify=notify)
+        return 2
+
     out_path = path.with_name(f"{path.stem}_fit.png")
-    out_path.write_bytes(new_data)
+    try:
+        out_path.write_bytes(new_data)
+    except OSError as exc:
+        _report(f"could not write {out_path}: {exc}", quiet=False, notify=notify)
+        return 2
+
     _report(f"{result.summary()} -> {out_path}", quiet, notify)
     return 0
 
@@ -148,9 +181,9 @@ def _build_shrink_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clipfit", add_help=False)
     p.add_argument("path", nargs="?")
     p.add_argument("--max-dim", type=int,
-                   default=int(os.environ.get("CLIPFIT_MAX_DIM", DEFAULT_MAX_DIM)))
+                   default=os.environ.get("CLIPFIT_MAX_DIM", str(DEFAULT_MAX_DIM)))
     p.add_argument("--max-bytes", type=_parse_bytes,
-                   default=_parse_bytes(os.environ.get("CLIPFIT_MAX_BYTES", str(DEFAULT_MAX_BYTES))))
+                   default=os.environ.get("CLIPFIT_MAX_BYTES", str(DEFAULT_MAX_BYTES)))
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--notify", action="store_true")
     p.add_argument("--sound", action="store_true")
