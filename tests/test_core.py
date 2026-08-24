@@ -7,6 +7,7 @@ from clipfit.core import (
     DEFAULT_MAX_BYTES,
     QUALITY_FLOOR,
     ByteBudgetError,
+    _encode_png,
     _encode_png_quantized,
     _normalize_for_png,
     shrink_image_bytes,
@@ -25,6 +26,21 @@ def _noisy_png(w: int, h: int) -> bytes:
     buf = io.BytesIO()
     noise.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def test_encode_png_uses_compress_level_3(monkeypatch):
+    captured = {}
+    orig = Image.Image.save
+
+    def spy(self, fp, format=None, **kwargs):
+        captured["format"] = format
+        captured.update(kwargs)
+        return orig(self, fp, format=format, **kwargs)
+
+    monkeypatch.setattr(Image.Image, "save", spy)
+    _encode_png(Image.new("RGB", (8, 8), (1, 2, 3)))
+    assert captured.get("format") == "PNG"
+    assert captured.get("compress_level") == 3
 
 
 def test_downscales_oversized_landscape():

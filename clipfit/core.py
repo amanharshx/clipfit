@@ -82,7 +82,7 @@ def _normalize_for_png(img: Image.Image) -> Image.Image:
 
 def _encode_png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img.save(buf, format="PNG", compress_level=3)
     return buf.getvalue()
 
 
