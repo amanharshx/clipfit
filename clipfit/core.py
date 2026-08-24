@@ -102,12 +102,15 @@ def shrink_image_bytes(
     data: bytes,
     max_dim: int = DEFAULT_MAX_DIM,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    force_png: bool = False,
 ) -> tuple[bytes, ShrinkResult]:
     """Downscale image bytes to satisfy both max_dim and max_bytes.
 
     Returns (possibly unchanged) image bytes plus a ShrinkResult. Aspect ratio
     is always preserved. If the input is already within both limits it is
-    returned untouched. A successful return guarantees len(output) <= max_bytes.
+    returned untouched, unless force_png is set (then it is always re-encoded
+    to PNG, even when no resize is needed). A successful return guarantees
+    len(output) <= max_bytes.
 
     Raises ByteBudgetError only when no PNG fits, which needs a budget smaller
     than the tiniest possible PNG (well under the CLI's 1024-byte minimum).
@@ -121,7 +124,8 @@ def shrink_image_bytes(
     longest = max(ow, oh)
 
     # Fast path: already within both limits -> leave it completely alone.
-    if longest <= max_dim and original_bytes <= max_bytes:
+    # Skipped when force_png is set, so file mode always produces a PNG.
+    if not force_png and longest <= max_dim and original_bytes <= max_bytes:
         return data, ShrinkResult(
             changed=False,
             original_size=(ow, oh),
